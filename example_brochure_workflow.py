@@ -138,7 +138,10 @@ def main():
     print("\n7. Exporting brochure to file...")
     print("-"*70)
 
-    output_path = "rise_cta_50m_report.pdf"
+    import os
+    os.makedirs("export", exist_ok=True)
+
+    output_path = "export/rise_cta_50m_report.pdf"
     success = export_brochure(db, instance_id, output_path)
 
     if success:

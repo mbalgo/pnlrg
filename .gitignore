@@ -23,7 +23,9 @@ build/
 
 # Generated files
 *.html
-*.pdf
+
+# Export folder for generated brochures
+export/
 
 # OS
 .DS_Store
