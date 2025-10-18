@@ -60,6 +60,58 @@ CREATE TABLE IF NOT EXISTS pnl_records (
     UNIQUE(date, market_id, program_id, resolution)
 );
 
+-- Brochure Templates table: reusable templates for brochures
+CREATE TABLE IF NOT EXISTS brochure_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    created_date DATE DEFAULT CURRENT_DATE
+);
+
+-- Brochure Instances table: manager-specific brochure configurations
+CREATE TABLE IF NOT EXISTS brochure_instances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_name TEXT NOT NULL,
+    manager_id INTEGER NOT NULL,
+    template_id INTEGER,  -- NULL for custom brochures
+    program_id INTEGER,   -- Which program to generate for
+    created_date DATE DEFAULT CURRENT_DATE,
+    last_generated TIMESTAMP,
+    FOREIGN KEY (manager_id) REFERENCES managers(id) ON DELETE CASCADE,
+    FOREIGN KEY (template_id) REFERENCES brochure_templates(id) ON DELETE SET NULL,
+    FOREIGN KEY (program_id) REFERENCES programs(id) ON DELETE CASCADE
+);
+
+-- Brochure Components table: charts, tables, text blocks
+CREATE TABLE IF NOT EXISTS brochure_components (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id INTEGER NOT NULL,
+    parent_type TEXT NOT NULL CHECK(parent_type IN ('template', 'instance')),
+    component_type TEXT NOT NULL CHECK(component_type IN ('chart', 'table', 'text')),
+    component_name TEXT NOT NULL,  -- e.g., 'equity_curve', 'performance_summary'
+    config_json TEXT,  -- JSON parameters (preset + overrides)
+    display_order INTEGER NOT NULL DEFAULT 0
+);
+
+-- Generated Brochures table: stores PDF blobs
+CREATE TABLE IF NOT EXISTS generated_brochures (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    brochure_instance_id INTEGER NOT NULL,
+    generated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    pdf_data BLOB,
+    file_size INTEGER,
+    FOREIGN KEY (brochure_instance_id) REFERENCES brochure_instances(id) ON DELETE CASCADE
+);
+
+-- Component Presets table: predefined component configurations
+CREATE TABLE IF NOT EXISTS component_presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    preset_name TEXT NOT NULL UNIQUE,
+    component_type TEXT NOT NULL,
+    default_config_json TEXT,
+    description TEXT
+);
+
 -- Indexes for performance optimization
 CREATE INDEX IF NOT EXISTS idx_pnl_date ON pnl_records(date);
 CREATE INDEX IF NOT EXISTS idx_pnl_program ON pnl_records(program_id);
@@ -69,3 +121,6 @@ CREATE INDEX IF NOT EXISTS idx_pnl_date_program ON pnl_records(date, program_id)
 CREATE INDEX IF NOT EXISTS idx_pnl_program_resolution ON pnl_records(program_id, resolution);
 CREATE INDEX IF NOT EXISTS idx_programs_manager ON programs(manager_id);
 CREATE INDEX IF NOT EXISTS idx_sectors_grouping ON sectors(grouping_name);
+CREATE INDEX IF NOT EXISTS idx_brochure_instances_manager ON brochure_instances(manager_id);
+CREATE INDEX IF NOT EXISTS idx_brochure_components_parent ON brochure_components(parent_id, parent_type);
+CREATE INDEX IF NOT EXISTS idx_generated_brochures_instance ON generated_brochures(brochure_instance_id);
