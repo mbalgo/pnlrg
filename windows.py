@@ -564,6 +564,87 @@ def generate_window_definitions_non_overlapping_not_snapped(
     return windows
 
 
+def generate_window_definitions_non_overlapping_reverse(
+    earliest_date: date,
+    latest_date: date,
+    window_length_years: int,
+    program_ids: List[int],
+    benchmark_ids: List[int],
+    window_set_name: Optional[str] = None
+) -> List[WindowDefinition]:
+    """
+    Generate non-overlapping windows working backwards from the latest date.
+
+    This ensures the most recent period is fully captured. The last window ends
+    exactly at latest_date and spans a full window_length_years period. Then
+    works backwards creating non-overlapping windows until earliest_date is reached.
+
+    Args:
+        earliest_date: Earliest date in the dataset
+        latest_date: Latest date in the dataset (end of most recent window)
+        window_length_years: Length of each window in years
+        program_ids: Programs to include in analysis
+        benchmark_ids: Benchmarks to include in analysis
+        window_set_name: Optional name for this set of windows
+
+    Returns:
+        List of WindowDefinition objects in chronological order (oldest first)
+
+    Example:
+        >>> # Data from 1973-01-31 to 2017-12-22
+        >>> windows = generate_window_definitions_non_overlapping_reverse(
+        ...     earliest_date=date(1973, 1, 31),
+        ...     latest_date=date(2017, 12, 22),
+        ...     window_length_years=5,
+        ...     program_ids=[1],
+        ...     benchmark_ids=[2, 3]
+        ... )
+        >>> # Returns windows ending at:
+        >>> # 2017-12-22 (last 5 years)
+        >>> # 2012-12-22 (previous 5 years)
+        >>> # 2007-12-22, 2002-12-22, etc.
+        >>> # Until we can't fit another full 5-year window
+    """
+    windows = []
+    current_end = latest_date
+    index = 0
+
+    while True:
+        # Calculate start date (exactly window_length_years before end)
+        win_start = current_end - relativedelta(years=window_length_years)
+
+        # If this window starts before our earliest data, stop
+        # We only want complete windows
+        if win_start < earliest_date:
+            break
+
+        # Create window definition
+        # Name shows the period ending date
+        win_def = WindowDefinition(
+            start_date=win_start,
+            end_date=current_end,
+            program_ids=program_ids.copy(),
+            benchmark_ids=benchmark_ids.copy(),
+            name=f"Period ending {current_end.strftime('%Y-%m-%d')}",
+            window_set=window_set_name,
+            index=index
+        )
+        windows.append(win_def)
+
+        # Move to next window (ending the day before this one starts)
+        current_end = win_start - relativedelta(days=1)
+        index += 1
+
+    # Reverse to return in chronological order (oldest first)
+    windows.reverse()
+
+    # Re-index after reversing
+    for i, win in enumerate(windows):
+        win.index = i
+
+    return windows
+
+
 def generate_window_definitions_overlapping(
     start_date: date,
     end_date: date,

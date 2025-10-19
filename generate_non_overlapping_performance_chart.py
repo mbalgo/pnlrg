@@ -12,7 +12,7 @@ Benchmarks are only included in periods where they have complete data.
 """
 
 from database import Database
-from windows import generate_window_definitions_non_overlapping_snapped, Window, compute_statistics
+from windows import generate_window_definitions_non_overlapping_reverse, Window, compute_statistics
 from datetime import date
 import pandas as pd
 import plotly.graph_objects as go
@@ -25,7 +25,13 @@ from components.chart_config import (
 )
 
 
-def main():
+def main(fund_size_m=30000):
+    """
+    Generate non-overlapping 5-year performance chart.
+
+    Args:
+        fund_size_m: Fund size in millions (default: 30000 for 30B)
+    """
     db = Database('pnlrg.db')
     db.connect()
 
@@ -33,29 +39,35 @@ def main():
     print("NON-OVERLAPPING 5-YEAR PERFORMANCE CHART GENERATOR")
     print("=" * 70)
 
-    # Get CTA program at 30 billion
+    # Get CTA program for specified fund size with manager info
     program = db.fetch_one("""
-        SELECT id, program_name, fund_size
-        FROM programs
-        WHERE program_name LIKE '%30000M%' OR program_name LIKE '%30B%'
+        SELECT p.id, p.program_name, p.program_nice_name, p.fund_size, m.manager_name
+        FROM programs p
+        JOIN managers m ON p.manager_id = m.id
+        WHERE p.program_name LIKE ? OR p.program_name LIKE ?
         LIMIT 1
-    """)
+    """, (f'%{fund_size_m}M%', f'%{fund_size_m//1000}B%'))
 
     if not program:
-        print("\nError: Could not find CTA 30 billion program!")
+        print(f"\nError: Could not find CTA program with fund size {fund_size_m}M!")
         print("Looking for any CTA program with largest fund size...")
         program = db.fetch_one("""
-            SELECT id, program_name, fund_size
-            FROM programs
-            WHERE program_name != 'Benchmarks'
-            ORDER BY fund_size DESC
+            SELECT p.id, p.program_name, p.program_nice_name, p.fund_size, m.manager_name
+            FROM programs p
+            JOIN managers m ON p.manager_id = m.id
+            WHERE p.program_name != 'Benchmarks'
+            ORDER BY p.fund_size DESC
             LIMIT 1
         """)
 
     program_id = program['id']
     program_name = program['program_name']
+    program_nice_name = program['program_nice_name'] or program_name  # Fallback to program_name if nice_name is null
+    manager_name = program['manager_name']
+    fund_size_actual = program['fund_size']
 
-    print(f"\nProgram: {program_name}")
+    print(f"\nManager: {manager_name}")
+    print(f"Program: {program_name}")
     print(f"Fund Size: ${program['fund_size']:,.0f}")
 
     # Get all benchmarks with their date ranges
@@ -101,19 +113,23 @@ def main():
 
     print(f"\nProgram Data Range: {earliest_date} to {latest_date}")
 
-    # Generate non-overlapping 5-year windows
-    print("\nGenerating non-overlapping 5-year windows...")
+    # Generate non-overlapping 5-year windows working backwards from end date
+    # This ensures the most recent 5-year period is fully captured
+    print("\nGenerating non-overlapping 5-year windows (reverse from latest date)...")
 
-    windows = generate_window_definitions_non_overlapping_snapped(
-        start_date=earliest_date,
-        end_date=latest_date,
+    windows = generate_window_definitions_non_overlapping_reverse(
+        earliest_date=earliest_date,
+        latest_date=latest_date,
         window_length_years=5,
         program_ids=[program_id],
         benchmark_ids=benchmark_ids,
-        window_set_name="non_overlapping_5yr"
+        window_set_name="non_overlapping_5yr_reverse"
     )
 
-    print(f"Generated {len(windows)} windows")
+    print(f"  Generated {len(windows)} windows")
+    print(f"  Window periods:")
+    for win in windows:
+        print(f"    {win.start_date} to {win.end_date}")
 
     # Compute statistics for each window
     print("\nComputing statistics for each window...")
@@ -184,7 +200,11 @@ def main():
     df = pd.DataFrame(results)
     df['date'] = pd.to_datetime(df['date'])
 
-    print(f"\nWindow periods: {df['window_name'].tolist()}")
+    # Create a string version of dates for x-axis (to avoid kaleido PDF rendering bug)
+    # Use yyyy-mm-dd format to show exact end dates
+    df['date_label'] = df['date'].dt.strftime('%Y-%m-%d')
+
+    print(f"\nWindow end dates: {df['date_label'].tolist()}")
 
     # Load chart configuration
     print("\nLoading chart configuration from database...")
@@ -196,16 +216,11 @@ def main():
     print(f"  Using preset: rolling_performance")
     print(f"  Paper size: {config['layout']['width']}x{config['layout']['height']} (A4)")
 
-    # Create 4-panel stacked chart with custom titles for non-overlapping
+    # Create 4-panel stacked chart using titles from config
     print("\nCreating 4-panel chart...")
 
-    # Customize panel titles for non-overlapping windows
-    panel_titles = [
-        '<b>Mean Monthly Return (5-Year Non-Overlapping)</b>',
-        '<b>Standard Deviation (5-Year Non-Overlapping)</b>',
-        '<b>CAGR (5-Year Non-Overlapping)</b>',
-        '<b>Maximum Drawdown - Compounded (5-Year Non-Overlapping)</b>'
-    ]
+    # Get panel titles from config (already updated in database)
+    panel_titles = panel_config['panel_titles']
 
     fig = make_subplots(
         rows=4, cols=1,
@@ -232,7 +247,7 @@ def main():
 
         fig.add_trace(
             go.Scatter(
-                x=df['date'],
+                x=df['date_label'],  # Use string year labels for kaleido PDF compatibility
                 y=df[f'prog_{metric_key}'] * 100,
                 name='Rise CTA',
                 line=dict(color=rise_color, width=line_width),
@@ -255,7 +270,7 @@ def main():
 
                 fig.add_trace(
                     go.Scatter(
-                        x=df['date'],
+                        x=df['date_label'],  # Use string year labels for kaleido PDF compatibility
                         y=df[col_name] * 100,
                         name=bm_name,
                         line=dict(color=bm_color, width=line_width),
@@ -279,24 +294,9 @@ def main():
             row=row, col=1
         )
 
-    # Update x-axes - show window end dates with explicit tick values
+    # X-axis configuration for categorical year labels
     axes_config = config['axes']
     x_axis_config = axes_config['x_axis']
-
-    # Create explicit tick values and labels for years
-    tick_vals = df['date'].tolist()
-    tick_text = [d.strftime('%Y') for d in df['date']]
-
-    for row in range(1, 5):
-        fig.update_xaxes(
-            title_text="Period End Date" if row == 4 else "",
-            title_font=dict(size=fonts['axis_title_size']),
-            tickfont=dict(size=fonts['axis_tick_size']),
-            tickmode='array',
-            tickvals=tick_vals,
-            ticktext=tick_text,
-            row=row, col=1
-        )
 
     # Overall layout from config
     layout_config = config['layout']
@@ -304,7 +304,7 @@ def main():
 
     fig.update_layout(
         title=dict(
-            text=f'<b>Non-Overlapping 5-Year Performance: {program_name} vs Benchmarks</b>',
+            text=f'<b>{manager_name}: {program_nice_name}</b><br><sub>5-Year Non-Overlapping Performance</sub>',
             font=dict(
                 size=fonts['title_size'],
                 family=fonts['family'],
@@ -320,8 +320,8 @@ def main():
         showlegend=True,
         legend=dict(
             orientation='h',
-            yanchor='top',
-            y=0.97,
+            yanchor='bottom',
+            y=1.02,  # Position above the title, below top margin
             xanchor='center',
             x=0.5,
             font=dict(size=fonts['legend_size'], family=fonts['family']),
@@ -335,15 +335,40 @@ def main():
         margin=layout_config['margin']
     )
 
-    # Update all axes styling from config (tickvals/ticktext already set above)
-    fig.update_xaxes(
-        showgrid=x_axis_config['showgrid'],
-        gridcolor=colors['grid'],
-        gridwidth=x_axis_config['gridwidth'],
-        showline=x_axis_config['showline'],
-        linewidth=x_axis_config['linewidth'],
-        linecolor=colors['axis_line']
-    )
+    # Update all x-axes with styling and explicit tick labels
+    print(f"\nApplying x-axis settings to {4} panels...")
+
+    # Create explicit tick values and text to force display of all dates
+    tick_vals = df['date_label'].tolist()
+    tick_text = df['date_label'].tolist()  # Use the yyyy-mm-dd strings directly
+
+    print(f"  Setting explicit tick labels: {tick_text}")
+
+    for row in range(1, 5):
+        fig.update_xaxes(
+            # Explicit tick values to force all labels to show
+            tickmode='array',
+            tickvals=tick_vals,
+            ticktext=tick_text,
+            # Font styling with angle for readability
+            tickfont=dict(
+                size=7,  # Even smaller to fit all yyyy-mm-dd dates
+                family=fonts['family'],
+                color=colors.get('text_secondary', '#7f8c8d')
+            ),
+            tickangle=-45,  # Rotate labels for better fit
+            # Title (only on bottom panel)
+            title_text="Period End Date" if row == 4 else "",
+            title_font=dict(size=fonts['axis_title_size']),
+            # Grid and axis styling from config
+            showgrid=x_axis_config['showgrid'],
+            gridcolor=colors['grid'],
+            gridwidth=x_axis_config['gridwidth'],
+            showline=x_axis_config['showline'],
+            linewidth=x_axis_config['linewidth'],
+            linecolor=colors['axis_line'],
+            row=row, col=1
+        )
 
     y_axis_config = axes_config['y_axis']
     fig.update_yaxes(
@@ -353,17 +378,27 @@ def main():
         showline=y_axis_config['showline'],
         linewidth=y_axis_config['linewidth'],
         linecolor=colors['axis_line'],
-        tickfont=dict(size=fonts['axis_tick_size'])
+        tickfont=dict(size=fonts['axis_tick_size']),
+        # Add visible zero line
+        zeroline=True,
+        zerolinewidth=1.5,
+        zerolinecolor='#666666'  # Dark gray for visibility
     )
 
-    # Export to PDF
-    print("\nExporting to PDF...")
+    # Export to PDF and HTML for debugging
+    print("\nExporting to PDF and HTML...")
 
     os.makedirs("export", exist_ok=True)
-    output_path = "export/non_overlapping_5yr_performance.pdf"
+    # Include fund size in filename
+    fund_size_label = f"{fund_size_m}M" if fund_size_m < 1000 else f"{fund_size_m}M"
+    output_path_pdf = f"export/non_overlapping_5yr_performance_{fund_size_label}.pdf"
+    output_path_html = f"export/non_overlapping_5yr_performance_{fund_size_label}_debug.html"
 
-    fig.write_image(output_path, format='pdf')
-    print(f"  [OK] Saved to: {output_path}")
+    fig.write_html(output_path_html)
+    print(f"  [OK] Saved HTML to: {output_path_html}")
+
+    fig.write_image(output_path_pdf, format='pdf')
+    print(f"  [OK] Saved PDF to: {output_path_pdf}")
 
     # Print summary statistics for each window
     print("\nSummary Statistics by Period:")
@@ -395,4 +430,11 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    # Allow specifying fund size as command line argument
+    # Usage: python generate_non_overlapping_performance_chart.py [fund_size_in_millions]
+    # Example: python generate_non_overlapping_performance_chart.py 1000
+    fund_size_m = int(sys.argv[1]) if len(sys.argv) > 1 else 30000
+
+    main(fund_size_m)
