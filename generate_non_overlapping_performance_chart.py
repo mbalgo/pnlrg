@@ -279,16 +279,22 @@ def main():
             row=row, col=1
         )
 
-    # Update x-axes - show window end dates
+    # Update x-axes - show window end dates with explicit tick values
     axes_config = config['axes']
     x_axis_config = axes_config['x_axis']
+
+    # Create explicit tick values and labels for years
+    tick_vals = df['date'].tolist()
+    tick_text = [d.strftime('%Y') for d in df['date']]
 
     for row in range(1, 5):
         fig.update_xaxes(
             title_text="Period End Date" if row == 4 else "",
             title_font=dict(size=fonts['axis_title_size']),
             tickfont=dict(size=fonts['axis_tick_size']),
-            tickformat='%Y',
+            tickmode='array',
+            tickvals=tick_vals,
+            ticktext=tick_text,
             row=row, col=1
         )
 
@@ -329,15 +335,14 @@ def main():
         margin=layout_config['margin']
     )
 
-    # Update all axes styling from config
+    # Update all axes styling from config (tickvals/ticktext already set above)
     fig.update_xaxes(
         showgrid=x_axis_config['showgrid'],
         gridcolor=colors['grid'],
         gridwidth=x_axis_config['gridwidth'],
         showline=x_axis_config['showline'],
         linewidth=x_axis_config['linewidth'],
-        linecolor=colors['axis_line'],
-        tickformat='%Y'  # Format dates as years
+        linecolor=colors['axis_line']
     )
 
     y_axis_config = axes_config['y_axis']
