@@ -1,0 +1,56 @@
+We now need to introduce the concept of segments or windows (synonyms here!). 
+
+Introduce the concept of a window_definition: 
+
+	class window_definition:
+		start_date
+		end_date	
+		list of manager(s)
+		list of benchmarks(s)
+
+The window_definition simply marks out a region of time and a list of managers and benchmarks.
+
+Introduce the concept of a window, which contains the actual data that the window_definition references.
+
+	class window:
+		bool data_is_complete
+		window_definition
+		get_manager_data(manager)
+		get_benchmark_data(benchmark)
+	
+Introduce the concept of some function to generate_window(window_definition).
+
+The actual window contains data and would be generated on-the-fly by calling generate_window(window_definition). Because there are thousands of windows we do not want to pre-generate the windows, only pre-generate the window_definition lists if necessary but see whether we can avoid even that.
+
+When generating a window, the rule is: If the window_definition specifies to include any benchmark or manager for which there is not complete data for the window (i.e. the series data in the database did not start before or on the window start_date or it did not end after or on the window end_date), then it is usually considered that there is no data for this window at all and it is usually going to be skipped. We only likely want to present analysis for windows where there was trading of all included managers and benchmarks during the window. For this reason the window has a flag called data_is_complete so that downstream functions can decide whether to include or exclude this window - they will usually exclude it but the option to include it is always there.
+
+Given the specification of a window_definition and the generated window of actual data, we can compute various statistics of the returns. So we need a function compute_statistics(window) or compute_statistics(window_definition) which will compute the statistic of the window.
+
+The exact list of statistics will likely change as this project evolves but for now we can do:
+
+	class statistics:
+		count
+		mean
+		median
+		standard_deviation
+		cummulative_returns_compounded
+		cummulative_returns_not_compounded
+		maximum_drawdown_compounded
+		maximum_drawdown__not_compounded
+
+	
+The *_compounded statistics are based on starting with $1000 and compounding returns to the end of the window. The *_not_compounded are based on having $1000 invested at the start of each month (or day when we are looking at daily returns later), i.e. this simulates when a client withdraws profits straight away each time there is a winning month or tops-up their account straight away each time there is a losing month. The other statistics are the standard statistics applied to the returns which occurred in the window.  Obviously, these statistics are for each manager and each benchmark which is in the window. 
+
+Introduce the concept of a set of windows defined by a set of window_definitions. This will allow us to analyse and present how the strategies and benchmarks performed over time or conditional on some event.
+
+To formalise this we introduce the concept of functions such as generate_window_definitions_XXX(...). 
+
+Here XXX is a placeholder for the various kinds of sets of window definitions that can be generatred. There are three major kinds that I can think of right now: XXX=non_overlapping_snapped, XXX=non_overlapping_not_snapped, XXX=overlapping, XXX=overlapping_reverse,  XXX=bespoke, XXX=conditional.
+
+non-overlapping is where we will generate non overlapping windows of a specified length such as 1-year, 2-years, 3-years, 5-years, 10-years etc... These window_definition sets will come in two flavours, snapped and non_snapped. The snapped means that the first window will line up with a natural year like, the 5-year windows of non_overlapping_snapped should have the first window_definition starting at one of 1970, 1975, etc.... and not 1971. The same for the 10-year window etc... odd years windows when snapped should align with years 1970, 1973, 1979... and not start on 1971, for example.   
+
+The overlapping means that the window start at the first point where there is data and moves forwards by 1 month for the next window_defintion.  The overlapping_reverse means that the last window_definition.end_date should be the greatest date for any manager being considered. This _reverse method is like sliding the window backwards so that we always get the latest data included event though the statistics will appear to change each time there is new data (i.e. this months statistics will be different to the ones computed for this month last month, because the windows will all have shifted). The _reverse windows answer the question: What happened over the last 12 months? The answer to that changes over time.
+
+Can you pleas ULTRATHINK this one as this will form an inmportant part of what we are doing. 
+
+ 
