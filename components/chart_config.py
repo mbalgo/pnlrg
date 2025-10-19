@@ -72,7 +72,7 @@ DEFAULT_AXES_CONFIG = {
         "linecolor": "#bdc3c7",
         "tickangle": 0,
         "date_tick_interval": 5,  # Years between ticks for date axes
-        "tick_format": "%Y"
+        "tickformat": "%Y"  # Format dates as years (YYYY)
     },
     "y_axis": {
         "showgrid": True,
@@ -335,6 +335,10 @@ def apply_axes_config(fig, config: Dict[str, Any], x_title: str = None, y_title:
         },
         'tickangle': x_config.get('tickangle', 0)
     }
+
+    # Add tickformat if specified (for date axes)
+    if 'tickformat' in x_config:
+        x_update['tickformat'] = x_config['tickformat']
 
     if x_title:
         x_update['title'] = {

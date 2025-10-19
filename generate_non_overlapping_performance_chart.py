@@ -336,7 +336,8 @@ def main():
         gridwidth=x_axis_config['gridwidth'],
         showline=x_axis_config['showline'],
         linewidth=x_axis_config['linewidth'],
-        linecolor=colors['axis_line']
+        linecolor=colors['axis_line'],
+        tickformat='%Y'  # Format dates as years
     )
 
     y_axis_config = axes_config['y_axis']
