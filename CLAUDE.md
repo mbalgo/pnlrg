@@ -49,8 +49,12 @@
 #### 4. `sectors`
 - Market groupings/classifications
 - Fields: `id`, `grouping_name`, `sector_name`
-- Supports multiple classification schemes (e.g., 'asset_class', 'geography')
+- Supports multiple classification schemes per strategy
+- **Current groupings**:
+  - `'mft_sector'`: 5 sectors (Energy, Base Metal, Fixed Income, Foreign Exchange, Equity Index)
+  - `'cta_sector'`: 9 sectors (adds Precious Metal, Crop, Soft, Meat - currently empty)
 - Unique constraint on `(grouping_name, sector_name)`
+- **Usage**: Query by grouping to avoid empty sectors (e.g., WHERE grouping_name='mft_sector')
 
 #### 5. `market_sector_mapping`
 - Many-to-many relationship between markets and sectors
@@ -59,10 +63,12 @@
 
 #### 6. `pnl_records`
 - Core performance data
-- Fields: `id`, `date`, `market_id`, `program_id`, `return`, `resolution`
+- Fields: `id`, `date`, `market_id`, `program_id`, `return`, `resolution`, `submission_date`
 - `return`: Percentage return as decimal (0.01 = 1%)
 - `resolution`: 'daily', 'monthly', 'weekly', etc.
+- `submission_date`: When data was submitted/updated (enables tracking revisions)
 - Unique constraint on `(date, market_id, program_id, resolution)`
+- **Important**: Old constraint handles duplicates; new rows only created when return value changes
 
 #### Brochure System Tables
 - `brochure_templates` - Reusable templates
@@ -102,27 +108,25 @@ managers (1:M) programs (1:M) pnl_records (M:1) markets
 - **Import Script**: `import_cta_results_v2.py`
 
 ### 2. Alphabet
-- **Programs**: MFT
+- **Programs**: MFT (Managed Futures Trading)
   - Fund Size: $10,000,000
   - Starting NAV: 1000
   - Starting Date: 2006-01-03
-- **Markets** (temporary sector-level structure):
-  - Energy
-  - Base Metals
-  - Bonds
-  - FX
-  - Equity Indices
-- **Data Source**: CSV file `C:\Users\matth\alphabet_backtest\20251020_sectors_only.csv`
-- **Import Script**: `import_alphabet_mft.py`
-- **Verification Script**: `verify_alphabet_data.py`
+- **Markets** (17 trading markets + 2 benchmarks):
+  - **Energy**: WTI, ULSD Diesel, Brent
+  - **Base Metal**: Ali (Aluminum), Copper, Zinc
+  - **Fixed Income**: 10y bond, T-Bond, Gilts 10y, KTB 10s
+  - **Foreign Exchange**: USDKRW
+  - **Equity Index**: ASX 200, DAX, CAC 40, Kospi 200, TX index, WIG 20
+  - **Benchmarks**: AREIT (to 2025-05-23), SP500 (to 2025-10-08)
+- **Data Sources**:
+  - Market data: `C:\Users\matth\OneDrive\Documents\MFT Portfolios\MFT_20251021_MARKET_BREAKDOWN.csv`
+  - Benchmark data: `C:\Users\matth\OneDrive\Documents\MFT Portfolios\MFT_20251021_BENCHMARKS.csv`
+- **Import Script**: `import_alphabet_mft_markets.py`
+- **Verification Script**: `verify_alphabet_mft_markets.py`
 - **Date Range**: 2006-01-03 to 2025-10-17 (5,161 trading days)
-- **Total Records**: 25,805 (5 sectors × 5,161 days)
-
-**NOTE**: Alphabet currently has sector-level data stored as "markets". When market-level breakdown becomes available:
-1. Convert these to proper sectors
-2. Create individual markets
-3. Link markets to sectors via `market_sector_mapping`
-4. Migrate PnL records to new market structure
+- **Total Records**: 97,589 (87,737 market + 9,852 benchmark)
+- **Sector Grouping**: `mft_sector` (5 sectors, fully mapped)
 
 ---
 
@@ -160,7 +164,7 @@ The Windows framework provides a sophisticated system for analyzing trading retu
 
 **IMPORTANT**: The CTA/hedge fund industry has specific conventions for performance statistics:
 
-1. **Standard Deviation** = Standard deviation of **DAILY** returns, annualized by √252
+1. **Standard Deviation** = Standard deviation of **DAILY** returns
 2. **Mean Return** = Average of monthly compounded returns
 3. **CAGR** = Compound Annual Growth Rate from actual calendar days
 4. **Max Drawdown** = Maximum decline from peak NAV (using daily granularity when available)
@@ -391,36 +395,53 @@ monthly_return = (ending_nav - starting_nav) / starting_nav
   - Imports multiple benchmarks (SP500, BTOP50, AREIT, Winton)
   - Batch processes multiple fund size variations
 
-### `import_alphabet_mft.py`
-- **Purpose**: Import Alphabet manager's MFT program sector-level data
-- **Source**: CSV file with daily PnL by sector
+### `import_alphabet_mft_markets.py`
+- **Purpose**: Import Alphabet MFT market-level daily PnL and benchmark data
+- **Sources**:
+  - Market data: `MFT_20251021_MARKET_BREAKDOWN.csv`
+  - Benchmark data: `MFT_20251021_BENCHMARKS.csv`
 - **Configuration**:
   - Fund Size: $10,000,000
   - Starting NAV: 1000
   - Resolution: daily
+  - Submission Date: 2025-10-21
 - **Process**:
-  1. Creates/verifies Alphabet manager
-  2. Creates MFT program
-  3. Creates 5 sector markets (Energy, Base Metals, Bonds, FX, Equity Indices)
-  4. Parses CSV (DD/MM/YYYY dates, comma-separated PnL values)
-  5. Converts absolute USD PnL to percentage returns
-  6. Bulk inserts pnl_records
-  7. Updates program starting_date
+  1. Creates 17 trading markets (WTI, Copper, DAX, etc.)
+  2. Creates/updates 2 benchmark markets (AREIT, SP500)
+  3. Parses market CSV (DD/MM/YYYY dates, comma-separated USD PnL)
+  4. Converts absolute USD PnL to percentage returns
+  5. Parses benchmark CSV (returns already in decimal format)
+  6. Bulk inserts 97,589 pnl_records with submission_date tracking
 - **CSV Format**:
   ```
-  Date,Energy,Base Metals,Bonds,FX,Equity Indices,MFT
-  3/01/2006,0,0,"-13,064","21,496","4,912",13344
+  Date,WTI,ULSD Diesel,Brent,Ali,Copper,...
+  03/01/2006,0,0,0,0,0,...
   ```
 
-### `verify_alphabet_data.py`
-- **Purpose**: Verify Alphabet import integrity
+### `verify_alphabet_mft_markets.py`
+- **Purpose**: Verify Alphabet market-level import integrity
 - **Checks**:
-  - Manager/program existence
-  - Market creation
-  - Record counts match CSV
-  - Date range validation
-  - Sample data cross-check (first 3 rows)
-  - Return statistics
+  - All 19 markets created (17 trading + 2 benchmarks)
+  - Record counts: 97,589 total
+  - Date range: 2006-01-03 to 2025-10-17
+  - Sample data cross-check against CSV
+  - Return statistics by market
+  - Submission date tracking
+
+### `create_sector_structure.py`
+- **Purpose**: Create sector definitions and market-sector mappings
+- **Creates**:
+  - `mft_sector` grouping: 5 sectors, 17 market mappings
+  - `cta_sector` grouping: 9 sectors, 0 mappings (future-ready)
+- **Verification**: Shows sector details and market assignments
+
+### `query_by_sector.py`
+- **Purpose**: Utility functions for sector-based queries
+- **Functions**:
+  - `list_markets_by_sector()` - List markets grouped by sector
+  - `get_markets_in_sector()` - Get market IDs for a specific sector
+  - `aggregate_pnl_by_sector()` - Sector-level performance aggregation
+  - `sector_performance_summary()` - High-level sector statistics
 
 ---
 
@@ -431,12 +452,17 @@ monthly_return = (ending_nav - starting_nav) / starting_nav
 | `schema.sql` | Main database schema |
 | `schema_chart_config.sql` | Chart configuration schema |
 | `database.py` | Database connection layer |
+| `windows.py` | Performance analysis framework (daily/monthly) |
 | `import_cta_results_v2.py` | Rise Capital HTML import |
-| `import_cta_results.py` | Rise Capital import (v1, legacy) |
-| `import_alphabet_mft.py` | Alphabet CSV import |
-| `verify_alphabet_data.py` | Alphabet data verification |
+| `import_alphabet_mft_markets.py` | Alphabet market-level CSV import |
+| `verify_alphabet_mft_markets.py` | Alphabet data verification |
+| `create_sector_structure.py` | Sector definitions and mappings |
+| `query_by_sector.py` | Sector-based query utilities |
+| `add_submission_date_column.py` | Schema migration for submission tracking |
+| `cleanup_alphabet_old_data.py` | Data cleanup utility |
 | `example_brochure_workflow.py` | Brochure generation examples |
 | `pnlrg.db` | SQLite database file |
+| `pnlrg_YYYYMMDD.db` | Database backups |
 
 ---
 
@@ -467,20 +493,73 @@ Current values in use:
 
 ---
 
+## Sector Grouping System
+
+### Overview
+The database supports **multiple classification schemes** via the `grouping_name` field in the `sectors` table. This allows the same market to be classified in different ways simultaneously.
+
+### Current Groupings
+
+#### `mft_sector` (MFT Strategy-Specific)
+- **Purpose**: Alphabet MFT strategy sectors for client pitches
+- **Sectors** (5 total, all populated):
+  1. **Energy** (3 markets): WTI, ULSD Diesel, Brent
+  2. **Base Metal** (3 markets): Ali, Copper, Zinc
+  3. **Fixed Income** (4 markets): 10y bond, T-Bond, Gilts 10y, KTB 10s
+  4. **Foreign Exchange** (1 market): USDKRW
+  5. **Equity Index** (6 markets): ASX 200, DAX, CAC 40, Kospi 200, TX index, WIG 20
+- **Total**: 17 market mappings
+- **Usage**: `WHERE grouping_name='mft_sector'` for clean, no-empty-sector queries
+
+#### `cta_sector` (CTA Strategy Framework)
+- **Purpose**: Comprehensive sector framework for future CTA data imports
+- **Sectors** (9 total, currently empty):
+  1. Energy (0 markets - ready for expansion)
+  2. Base Metal (0 markets)
+  3. **Precious Metal** (0 markets - Gold, Silver, Platinum)
+  4. **Crop** (0 markets - Corn, Wheat, Soybeans)
+  5. **Soft** (0 markets - Coffee, Sugar, Cotton, Cocoa)
+  6. **Meat** (0 markets - Live Cattle, Lean Hogs, Feeder Cattle)
+  7. Fixed Income (0 markets)
+  8. Foreign Exchange (0 markets)
+  9. Equity Index (0 markets)
+- **Total**: 0 market mappings (future-ready)
+- **Usage**: Will be populated when CTA strategy data is imported
+
+### Naming Conventions
+- **Sectors**: Singular form (e.g., "Energy", "Base Metal", "Crop")
+  - Reads naturally: "WTI is an Energy", "Copper is a Base Metal"
+- **Groupings**: Strategy-specific (e.g., "mft_sector", "cta_sector")
+  - Future examples: "geography", "liquidity", "strategy_type"
+
+### Querying by Sector
+
+```python
+from query_by_sector import get_markets_in_sector, aggregate_pnl_by_sector
+
+# Get all Energy markets for MFT
+energy_markets = get_markets_in_sector(db, 'Energy', grouping_name='mft_sector')
+
+# Aggregate performance by sector
+aggregate_pnl_by_sector(db, program_id=11, grouping_name='mft_sector')
+```
+
+### Future Groupings (Planned)
+- `'geography'`: US, Europe, Asia, Global
+- `'liquidity'`: High, Medium, Low
+- `'strategy_type'`: Trend Following, Mean Reversion, Arbitrage
+- `'exchange'`: CME, ICE, EUREX, etc.
+
+---
+
 ## Future Enhancements Planned
 
-### For Alphabet Manager
-1. **Market-Level Data**: When Alphabet provides individual market breakdown:
-   - Create proper sector records in `sectors` table
-   - Create individual markets
-   - Link via `market_sector_mapping`
-   - Migrate existing sector-level PnL records to market level
-
 ### General
-2. **Sector Grouping System**: Fully utilize the flexible sector grouping
-3. **Additional Resolutions**: Weekly, quarterly reporting
-4. **Performance Analytics**: Sharpe ratios, drawdowns, correlations
-5. **Brochure Automation**: Scheduled generation and distribution
+1. **Additional Sector Groupings**: Geography, liquidity, strategy-type classifications
+2. **Additional Resolutions**: Weekly, quarterly reporting
+3. **Performance Analytics**: Sharpe ratios, Sortino ratios, correlations, beta
+4. **Brochure Automation**: Scheduled generation and distribution
+5. **Data Revision Tracking**: Leverage submission_date for audit trails
 
 ---
 
@@ -545,9 +624,22 @@ ORDER BY date
 
 ---
 
-## Current Status (as of 2025-10-20)
+## Current Status (as of 2025-10-21)
 
 ### Recently Completed
+
+#### Alphabet MFT Market-Level Data Import (October 21, 2025)
+- ✅ Created database backup (`pnlrg_20251021.db`)
+- ✅ Added `submission_date` column to `pnl_records` for data versioning
+- ✅ Deleted old sector-level temporary data (25,805 records)
+- ✅ Imported 17 trading markets (WTI, Copper, DAX, etc.)
+- ✅ Imported 2 benchmark markets (AREIT to 2025-05-23, SP500 to 2025-10-08)
+- ✅ Imported 97,589 daily PnL records (87,737 market + 9,852 benchmark)
+- ✅ Created sector structure with two groupings:
+  - `mft_sector`: 5 sectors, 17 market mappings
+  - `cta_sector`: 9 sectors, 0 mappings (future-ready)
+- ✅ Verified data integrity (100% match with CSV sources)
+- ✅ Created sector query utilities
 
 #### Windows Framework Refactor (October 2025)
 - ✅ Refactored `windows.py` to use daily returns as primary data source
@@ -555,66 +647,67 @@ ORDER BY date
 - ✅ Updated `compute_statistics()` to calculate std dev from daily returns (industry standard)
 - ✅ Added helper functions: `aggregate_daily_to_monthly()`, `annualize_daily_std()`
 - ✅ Expanded `Statistics` dataclass with daily fields
-- ✅ Tested with Alphabet MFT data (5,161 days, 238 months)
-- ✅ Created `generate_alphabet_mft_monthly_performance_chart_v2.py` using new framework
 - ✅ Backward compatibility maintained for Rise CTA monthly-only data
 
-#### Chart Configuration System
-- ✅ Added `monthly_rolling_performance` chart type to database
-- ✅ Configured for line charts (no markers) with A4 layout
-- ✅ Preset ID: 4 in `chart_style_presets` table
+### Data Quality Metrics (Alphabet MFT - Market Level)
+- **Date Range**: 2006-01-03 to 2025-10-17 (5,161 trading days)
+- **Total Records**: 97,589 (87,737 market + 9,852 benchmark)
+- **Markets**: 17 trading + 2 benchmarks
+- **Avg Daily Return**: 0.0184% (across all markets/benchmarks)
+- **Best Day**: +11.59%
+- **Worst Day**: -14.83%
+- **Win Rate**: 48.2% positive days
 
-#### Alphabet Manager Setup
-- ✅ Alphabet manager created
-- ✅ MFT program set up with $10M fund size
-- ✅ 5 sector markets created (Energy, Base Metals, Bonds, FX, Equity Indices)
-- ✅ Imported 25,805 daily PnL records (2006-01-03 to 2025-10-17)
-- ✅ Verified data integrity (100% match with CSV source)
-- ✅ Created import and verification scripts
-- ✅ Generated performance charts (5-year, 1-year, monthly windows)
+### Sector Performance Insights (MFT Strategy)
+- **Best Performer**: Base Metal (0.0339% avg daily, 53.3% win rate)
+- **Most Stable**: Energy (0.0263% avg daily, 49.1% win rate)
+- **Most Diversified**: Equity Index (6 markets, 0.0051% avg daily)
+- **Lowest Volatility**: Fixed Income (0.0207% avg daily, 49.6% win rate)
 
-### Data Quality Metrics (Alphabet MFT)
-- Date Range: 2006-01-03 to 2025-10-17
-- Trading Days: 5,161
-- Total Records: 25,805
-- Win Rate: 51.8% (13,371 positive days / 25,805 total)
-- Avg Daily Return: +0.06%
-- Best Day: +6.72%
-- Worst Day: -3.62%
-
-### Key Metrics (Monthly Rolling Performance)
-- Total Months: 238
-- Mean Monthly Return: 6.89%
-- **Std Dev (annualized from daily)**: 16.19% (industry standard!)
-- Median Std Dev: 15.40%
-- Std Dev Range: 8.21% to 36.35%
-
-### Chart Outputs Generated
-1. **5-Year Windows**: `export/alphabet_mft_5yr_performance.pdf` (3 windows, bar charts)
-2. **1-Year Windows**: `export/alphabet_mft_1yr_performance.pdf` (18 windows, bar charts)
-3. **Monthly Windows v2**: `export/alphabet_mft_monthly_performance_v2.pdf` (238 windows, line charts, **with correct std dev!**)
+### Database Structure
+- **Managers**: 2 (Rise Capital Management, Alphabet)
+- **Programs**: Multiple (Rise CTA variants, Alphabet MFT)
+- **Markets**: 27 total (trading + benchmarks)
+- **Sectors**: 14 total (5 mft_sector + 9 cta_sector)
+- **Market-Sector Mappings**: 17 (all for mft_sector)
+- **PnL Records**: 100,000+ across all programs
 
 ### Next Steps
-- Apply refactored framework to Rise CTA when daily data becomes available
-- Await market-level breakdown from Alphabet for proper sector structure
-- Add Alphabet to automated reporting workflows
-- Consider refactoring other chart generation scripts to use new framework
+- Generate client pitch materials for Alphabet MFT using sector framework
+- Create sector-level performance charts and analysis
+- Apply Windows framework to sector aggregations
+- Prepare brochure templates with sector breakdowns
+- Import CTA strategy data when available (using cta_sector framework)
 
 ---
 
 ## Questions & Decisions Log
 
-### 2025-10-20: Alphabet Import Decisions
-- **Q**: How to handle sector-level data without market breakdown?
-- **A**: Create sectors as temporary "markets" with `asset_class='future'`, convert later
-- **Q**: What fund size to use?
-- **A**: $10,000,000 (provided by user)
-- **Q**: Date format in CSV?
-- **A**: DD/MM/YYYY (e.g., "3/01/2006" = January 3, 2006)
-- **Q**: How to store returns?
-- **A**: As decimals where 0.01 = 1% (consistent with existing data)
-- **Q**: Starting NAV?
-- **A**: 1000 (standard across all programs)
+### 2025-10-21: Sector Structure Decisions
+- **Q**: What should `grouping_name` be called - 'asset_class' or 'sector'?
+- **A**: Strategy-specific groupings: 'mft_sector', 'cta_sector', etc. This allows multiple sector frameworks per strategy.
+- **Q**: Singular or plural sector names?
+- **A**: **Singular** (e.g., "Energy", "Base Metal", "Crop") - reads more naturally: "WTI is an Energy"
+- **Q**: Should empty sectors be created?
+- **A**: Create in `cta_sector` grouping (future-ready), omit from `mft_sector` (clean queries)
+- **Q**: Should benchmarks be mapped to sectors?
+- **A**: No - benchmarks remain unmapped as they're for comparison, not strategy composition
+
+### 2025-10-21: Data Versioning Decisions
+- **Q**: How to track data revisions from managers?
+- **A**: Added `submission_date` column to `pnl_records`
+- **Q**: Create new row for every submission?
+- **A**: No - only create new row when actual return value changes (not just submission date)
+- **Q**: How to query latest data?
+- **A**: Use `MAX(submission_date)` or default to latest; old constraint handles duplicates programmatically
+
+### 2025-10-21: Alphabet Market-Level Import Decisions
+- **Q**: Market names from CSV headers?
+- **A**: Use exact names (WTI, ULSD Diesel, Ali, etc.) with `asset_class='future'`, `region='US'`, `currency='USD'`
+- **Q**: Delete old sector-level data?
+- **A**: Yes - market-level data replaces temporary sector data
+- **Q**: Handle benchmark data cutoff (AREIT ends 2025-05-23)?
+- **A**: Only import records where data exists; skip empty/future dates
 
 ### 2025-10-20: Windows Framework Refactor Decisions
 - **Q**: Should std dev be calculated from daily or monthly returns?
@@ -652,6 +745,11 @@ ORDER BY date
 
 ---
 
-**Last Updated**: 2025-10-20
+**Last Updated**: 2025-10-21
 **Updated By**: Claude (via user request)
-**Change Summary**: Major refactor of Windows framework to use daily returns as primary data source. Added comprehensive documentation for industry-standard statistics calculations. Created monthly rolling performance charts with correct std dev calculations.
+**Change Summary**:
+- Imported Alphabet MFT market-level data (97,589 records across 17 markets + 2 benchmarks)
+- Added `submission_date` column for data versioning and audit trails
+- Created comprehensive sector structure (mft_sector + cta_sector groupings)
+- Documented sector-based query utilities and performance insights
+- Updated all file references and current status sections
