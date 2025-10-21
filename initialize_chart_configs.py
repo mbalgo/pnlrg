@@ -15,7 +15,8 @@ from components.chart_config import (
     DEFAULT_AXES_CONFIG,
     DEFAULT_SERIES_CONFIG,
     DEFAULT_PANEL_CONFIG,
-    ROLLING_PERFORMANCE_PANEL_CONFIG
+    ROLLING_PERFORMANCE_PANEL_CONFIG,
+    MONTHLY_ROLLING_PERFORMANCE_PANEL_CONFIG
 )
 
 
@@ -173,13 +174,73 @@ def create_a4_preset(db):
     return preset_id
 
 
-def register_chart_types(db, default_preset_id, rolling_preset_id, a4_preset_id):
+def create_monthly_rolling_performance_preset(db):
+    """Create preset specifically for monthly rolling performance charts."""
+    print("\nCreating monthly rolling performance chart preset...")
+
+    # Check if already exists
+    existing = db.fetch_one("SELECT id FROM chart_style_presets WHERE preset_name = 'monthly_rolling_performance'")
+    if existing:
+        print("  [SKIP] Monthly rolling performance preset already exists (ID: {})".format(existing['id']))
+        return existing['id']
+
+    # Monthly rolling performance uses lines only (no markers) and A4 paper
+    monthly_layout = DEFAULT_LAYOUT_CONFIG.copy()
+    monthly_layout['width'] = 595  # A4 width
+    monthly_layout['height'] = 842  # A4 height
+    monthly_layout['margin'] = {"l": 50, "r": 20, "t": 80, "b": 40}
+
+    monthly_style = DEFAULT_STYLE_CONFIG.copy()
+    monthly_style['fonts'] = {
+        "family": "Arial, sans-serif",
+        "title_size": 14,
+        "subtitle_size": 11,
+        "axis_title_size": 10,
+        "axis_tick_size": 9,
+        "legend_size": 8,
+        "hover_size": 10
+    }
+
+    monthly_series = DEFAULT_SERIES_CONFIG.copy()
+    monthly_series['mode'] = 'lines'  # Lines only, no markers
+    monthly_series['include_markers'] = False
+
+    # Insert preset
+    db.execute("""
+        INSERT INTO chart_style_presets (
+            preset_name,
+            description,
+            layout_config,
+            style_config,
+            axes_config,
+            series_config,
+            panel_config,
+            is_default
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        'monthly_rolling_performance',
+        'Multi-panel monthly rolling performance charts with line graphs (A4 layout)',
+        json.dumps(monthly_layout, indent=2),
+        json.dumps(monthly_style, indent=2),
+        json.dumps(DEFAULT_AXES_CONFIG, indent=2),
+        json.dumps(monthly_series, indent=2),
+        json.dumps(MONTHLY_ROLLING_PERFORMANCE_PANEL_CONFIG, indent=2),
+        0  # not default
+    ))
+
+    preset_id = db.connection.execute("SELECT last_insert_rowid()").fetchone()[0]
+    print(f"  [OK] Created monthly rolling performance preset (ID: {preset_id})")
+    return preset_id
+
+
+def register_chart_types(db, default_preset_id, rolling_preset_id, a4_preset_id, monthly_rolling_preset_id):
     """Register all chart types with their default presets."""
     print("\nRegistering chart types...")
 
     chart_types = [
         ('equity_curve', a4_preset_id, 'Equity curve showing NAV over time'),
         ('rolling_performance', rolling_preset_id, '4-panel rolling performance metrics'),
+        ('monthly_rolling_performance', monthly_rolling_preset_id, '4-panel monthly rolling performance with line charts'),
         ('monthly_heatmap', a4_preset_id, 'Monthly returns heatmap'),
         ('drawdown_chart', a4_preset_id, 'Drawdown over time'),
         ('performance_summary', default_preset_id, 'Performance statistics table')
@@ -215,9 +276,10 @@ def main():
         default_preset_id = create_default_style_preset(db)
         rolling_preset_id = create_rolling_performance_preset(db)
         a4_preset_id = create_a4_preset(db)
+        monthly_rolling_preset_id = create_monthly_rolling_performance_preset(db)
 
         # Step 3: Register chart types
-        register_chart_types(db, default_preset_id, rolling_preset_id, a4_preset_id)
+        register_chart_types(db, default_preset_id, rolling_preset_id, a4_preset_id, monthly_rolling_preset_id)
 
         print("\n" + "=" * 70)
         print("CHART CONFIGURATION INITIALIZATION COMPLETE")

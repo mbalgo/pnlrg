@@ -120,6 +120,25 @@ ROLLING_PERFORMANCE_PANEL_CONFIG = {
     ]
 }
 
+MONTHLY_ROLLING_PERFORMANCE_PANEL_CONFIG = {
+    "vertical_spacing": 0.10,
+    "panel_heights": [0.25, 0.25, 0.25, 0.25],
+    "title_font_size": 11,
+    "show_legend_on_panel": 1,
+    "panel_titles": [
+        "<b>Mean Monthly Return</b>",
+        "<b>Standard Deviation</b>",
+        "<b>CAGR</b>",
+        "<b>Maximum Drawdown - Compounded</b>"
+    ],
+    "y_axis_titles": [
+        "Mean Return (%)",
+        "Std Dev (%)",
+        "CAGR (%)",
+        "Max Drawdown (%)"
+    ]
+}
+
 
 # =============================================================================
 # Configuration Loading Functions

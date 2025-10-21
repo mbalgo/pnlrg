@@ -80,16 +80,21 @@ class Statistics:
     - Compounded: Start with $1000, compound all returns
     - Simple: Invest $1000 each period (withdraw profits/top-up losses each period)
 
+    IMPORTANT: As of the daily-data refactor, std_dev is calculated from DAILY returns
+    (industry standard), while mean/median/CAGR are calculated from monthly returns.
+
     Attributes:
-        count: Number of return observations
-        mean: Average return (as decimal)
-        median: Median return (as decimal)
-        std_dev: Standard deviation of returns
+        count: Number of monthly return observations
+        mean: Average monthly return (as decimal)
+        median: Median monthly return (as decimal)
+        std_dev: Standard deviation of DAILY returns, annualized (industry standard)
         cumulative_return_compounded: Total compounded return
         cumulative_return_simple: Sum of all returns
         max_drawdown_compounded: Maximum % decline from peak (compounded NAV)
         max_drawdown_simple: Maximum decline in cumulative P&L
         cagr: Compound Annual Growth Rate (annualized return)
+        daily_count: Number of daily observations used for std_dev calculation
+        daily_std_dev_raw: Standard deviation of daily returns (not annualized)
     """
     count: int
     mean: float
@@ -100,6 +105,8 @@ class Statistics:
     max_drawdown_compounded: float
     max_drawdown_simple: float
     cagr: float = 0.0
+    daily_count: int = 0
+    daily_std_dev_raw: float = 0.0
 
 
 class Window:
@@ -282,11 +289,156 @@ class Window:
 
         return self._benchmark_data[market_id]
 
+    def get_manager_daily_data(self, program_id: int) -> pd.DataFrame:
+        """
+        Fetch DAILY returns for a program within this window.
+
+        Aggregates across all markets (SUM of daily returns).
+        This is the new primary method for fetching data, as industry standard
+        statistics (especially std dev) should be calculated from daily returns.
+
+        Args:
+            program_id: Program ID to fetch
+
+        Returns:
+            DataFrame with columns ['date', 'return'] containing daily returns
+        """
+        cache_key = f'daily_{program_id}'
+        if not hasattr(self, '_daily_manager_data'):
+            self._daily_manager_data = {}
+
+        if cache_key not in self._daily_manager_data:
+            # Query database for DAILY returns, aggregated across all markets
+            results = self.db.fetch_all("""
+                SELECT pr.date, SUM(pr.return) as total_return
+                FROM pnl_records pr
+                WHERE pr.program_id = ?
+                AND pr.resolution = 'daily'
+                AND pr.date >= ?
+                AND pr.date <= ?
+                GROUP BY pr.date
+                ORDER BY pr.date
+            """, (program_id, self.definition.start_date, self.definition.end_date))
+
+            df = pd.DataFrame(results, columns=['date', 'return'])
+            if len(df) > 0:
+                df['date'] = pd.to_datetime(df['date'])
+            self._daily_manager_data[cache_key] = df
+
+        return self._daily_manager_data[cache_key]
+
+    def get_benchmark_daily_data(self, market_id: int) -> pd.DataFrame:
+        """
+        Fetch DAILY returns for a benchmark within this window.
+
+        Args:
+            market_id: Market ID to fetch (must have is_benchmark=1)
+
+        Returns:
+            DataFrame with columns ['date', 'return'] containing daily returns
+        """
+        cache_key = f'daily_{market_id}'
+        if not hasattr(self, '_daily_benchmark_data'):
+            self._daily_benchmark_data = {}
+
+        if cache_key not in self._daily_benchmark_data:
+            # Get the Benchmarks program ID
+            benchmarks_program = self.db.fetch_one(
+                "SELECT id FROM programs WHERE program_name = 'Benchmarks'"
+            )
+
+            if not benchmarks_program:
+                # No benchmarks program exists
+                self._daily_benchmark_data[cache_key] = pd.DataFrame(columns=['date', 'return'])
+                return self._daily_benchmark_data[cache_key]
+
+            # Query for DAILY benchmark returns
+            results = self.db.fetch_all("""
+                SELECT pr.date, pr.return
+                FROM pnl_records pr
+                JOIN markets m ON pr.market_id = m.id
+                WHERE pr.program_id = ?
+                AND pr.market_id = ?
+                AND m.is_benchmark = 1
+                AND pr.resolution = 'daily'
+                AND pr.date >= ?
+                AND pr.date <= ?
+                ORDER BY pr.date
+            """, (benchmarks_program['id'], market_id,
+                  self.definition.start_date, self.definition.end_date))
+
+            df = pd.DataFrame(results, columns=['date', 'return'])
+            if len(df) > 0:
+                df['date'] = pd.to_datetime(df['date'])
+            self._daily_benchmark_data[cache_key] = df
+
+        return self._daily_benchmark_data[cache_key]
+
+
+# =============================================================================
+# Helper Functions for Daily/Monthly Aggregation
+# =============================================================================
+
+def aggregate_daily_to_monthly(daily_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Aggregate daily returns to monthly returns by compounding within each month.
+
+    Args:
+        daily_df: DataFrame with 'date' and 'return' columns (daily returns)
+
+    Returns:
+        DataFrame with monthly returns (one row per calendar month)
+    """
+    if daily_df is None or len(daily_df) == 0:
+        return pd.DataFrame(columns=['date', 'return'])
+
+    # Ensure date is datetime
+    df = daily_df.copy()
+    if not pd.api.types.is_datetime64_any_dtype(df['date']):
+        df['date'] = pd.to_datetime(df['date'])
+
+    # Group by year-month and compound returns within each month
+    df['year_month'] = df['date'].dt.to_period('M')
+
+    monthly_returns = []
+    for period, group in df.groupby('year_month'):
+        # Compound daily returns to get monthly return
+        monthly_return = (1 + group['return']).prod() - 1
+        # Use last day of the month as the date
+        month_end_date = group['date'].max()
+        monthly_returns.append({
+            'date': month_end_date,
+            'return': monthly_return
+        })
+
+    return pd.DataFrame(monthly_returns)
+
+
+def annualize_daily_std(daily_std: float, trading_days_per_year: int = 252) -> float:
+    """
+    Annualize standard deviation of daily returns.
+
+    Industry standard formula: daily_std × sqrt(trading_days_per_year)
+
+    Args:
+        daily_std: Standard deviation of daily returns (as decimal, e.g., 0.02 for 2%)
+        trading_days_per_year: Number of trading days per year (default: 252)
+
+    Returns:
+        Annualized standard deviation
+    """
+    return daily_std * np.sqrt(trading_days_per_year)
+
 
 def compute_statistics(window: Window, entity_id: int,
                        entity_type: str = 'manager') -> Statistics:
     """
     Compute statistics for a program or benchmark within a window.
+
+    NEW APPROACH (post-refactor):
+    - Fetches DAILY data first for std dev calculation (industry standard)
+    - Aggregates daily to monthly for mean/median/CAGR calculations
+    - Falls back to monthly-only data if daily data not available
 
     Calculates both compounded and simple (non-compounded) statistics:
     - Compounded: Simulates starting with $1000 and compounding returns
@@ -303,61 +455,125 @@ def compute_statistics(window: Window, entity_id: int,
     Example:
         >>> window = Window(window_def, db)
         >>> stats = compute_statistics(window, program_id=1, entity_type='manager')
-        >>> print(f"CAGR: {stats.cumulative_return_compounded:.2%}")
+        >>> print(f"CAGR: {stats.cagr:.2%}")
+        >>> print(f"Std Dev (annualized from daily): {stats.std_dev:.2%}")
     """
-    # Get appropriate data based on entity type
+    # Step 1: Try to get DAILY data first (preferred)
     if entity_type == 'manager':
-        df = window.get_manager_data(entity_id)
+        daily_df = window.get_manager_daily_data(entity_id)
     else:  # entity_type == 'benchmark'
-        df = window.get_benchmark_data(entity_id)
+        daily_df = window.get_benchmark_daily_data(entity_id)
 
-    # Handle empty data
-    if df is None or len(df) == 0:
-        return Statistics(
-            count=0,
-            mean=float('nan'),
-            median=float('nan'),
-            std_dev=float('nan'),
-            cumulative_return_compounded=float('nan'),
-            cumulative_return_simple=float('nan'),
-            max_drawdown_compounded=float('nan'),
-            max_drawdown_simple=float('nan')
-        )
+    # Step 2: Check if we have daily data
+    has_daily_data = daily_df is not None and len(daily_df) > 0
 
-    returns = df['return'].values
+    if has_daily_data:
+        # NEW PATH: Use daily data for std dev, aggregate to monthly for other stats
+        daily_returns = daily_df['return'].values
+        daily_count = len(daily_returns)
 
-    # Basic statistics
-    count = len(returns)
-    mean = float(returns.mean())
-    median = float(np.median(returns))
-    std_dev = float(returns.std(ddof=1)) if count > 1 else float('nan')
+        # Calculate std dev from DAILY returns (industry standard)
+        if daily_count > 1:
+            daily_std_raw = float(daily_returns.std(ddof=1))
+            daily_std_annualized = annualize_daily_std(daily_std_raw)
+        else:
+            daily_std_raw = float('nan')
+            daily_std_annualized = float('nan')
+
+        # Aggregate daily to monthly for other statistics
+        monthly_df = aggregate_daily_to_monthly(daily_df)
+
+        if len(monthly_df) == 0:
+            # Edge case: no monthly data after aggregation
+            return Statistics(
+                count=0,
+                mean=float('nan'),
+                median=float('nan'),
+                std_dev=daily_std_annualized,  # Use daily std dev
+                cumulative_return_compounded=float('nan'),
+                cumulative_return_simple=float('nan'),
+                max_drawdown_compounded=float('nan'),
+                max_drawdown_simple=float('nan'),
+                daily_count=daily_count,
+                daily_std_dev_raw=daily_std_raw
+            )
+
+        monthly_returns = monthly_df['return'].values
+        monthly_count = len(monthly_returns)
+
+    else:
+        # FALLBACK PATH: Only monthly data available (legacy, e.g., Rise CTA)
+        if entity_type == 'manager':
+            monthly_df = window.get_manager_data(entity_id)
+        else:
+            monthly_df = window.get_benchmark_data(entity_id)
+
+        if monthly_df is None or len(monthly_df) == 0:
+            return Statistics(
+                count=0,
+                mean=float('nan'),
+                median=float('nan'),
+                std_dev=float('nan'),
+                cumulative_return_compounded=float('nan'),
+                cumulative_return_simple=float('nan'),
+                max_drawdown_compounded=float('nan'),
+                max_drawdown_simple=float('nan'),
+                daily_count=0,
+                daily_std_dev_raw=float('nan')
+            )
+
+        monthly_returns = monthly_df['return'].values
+        monthly_count = len(monthly_returns)
+        daily_count = 0
+        daily_std_raw = float('nan')
+
+        # Estimate: use monthly std dev as fallback (NOT industry standard)
+        if monthly_count > 1:
+            daily_std_annualized = float(monthly_returns.std(ddof=1))
+        else:
+            daily_std_annualized = float('nan')
+
+    # Step 3: Calculate statistics from monthly returns
+    mean = float(monthly_returns.mean()) if monthly_count > 0 else float('nan')
+    median = float(np.median(monthly_returns)) if monthly_count > 0 else float('nan')
 
     # Cumulative returns
-    cumulative_return_compounded = float((1 + pd.Series(returns)).prod() - 1)
-    cumulative_return_simple = float(returns.sum())
+    cumulative_return_compounded = float((1 + pd.Series(monthly_returns)).prod() - 1) if monthly_count > 0 else float('nan')
+    cumulative_return_simple = float(monthly_returns.sum()) if monthly_count > 0 else float('nan')
 
     # CAGR (Compound Annual Growth Rate)
-    # Assume monthly data, so annualize by: (1 + total_return)^(12/months) - 1
-    if count > 0:
-        years = count / 12.0  # Convert months to years
+    # Use actual date range for accurate annualization
+    if monthly_count > 0 and not np.isnan(cumulative_return_compounded):
+        # Calculate years from actual window dates
+        days = (window.definition.end_date - window.definition.start_date).days
+        years = days / 365.25
         cagr = float(((1 + cumulative_return_compounded) ** (1.0 / years)) - 1) if years > 0 else 0.0
     else:
         cagr = 0.0
 
-    # Drawdowns
-    max_dd_comp = _calculate_max_drawdown_compounded(returns)
-    max_dd_simple = _calculate_max_drawdown_simple(returns)
+    # Drawdowns: Use DAILY data if available for more accurate intra-month drawdowns
+    # This captures drawdowns that occur during a month, not just month-end values
+    if has_daily_data and daily_count > 0:
+        # Calculate from daily returns (most accurate)
+        max_dd_comp = _calculate_max_drawdown_compounded(daily_returns)
+        max_dd_simple = _calculate_max_drawdown_simple(daily_returns)
+    else:
+        # Fallback: Use monthly returns (legacy path)
+        max_dd_comp = _calculate_max_drawdown_compounded(monthly_returns) if monthly_count > 0 else float('nan')
+        max_dd_simple = _calculate_max_drawdown_simple(monthly_returns) if monthly_count > 0 else float('nan')
 
     return Statistics(
-        count=count,
+        count=monthly_count,
         mean=mean,
         median=median,
-        std_dev=std_dev,
+        std_dev=daily_std_annualized,  # INDUSTRY STANDARD: from daily returns
         cumulative_return_compounded=cumulative_return_compounded,
         cumulative_return_simple=cumulative_return_simple,
         max_drawdown_compounded=max_dd_comp,
         max_drawdown_simple=max_dd_simple,
-        cagr=cagr
+        cagr=cagr,
+        daily_count=daily_count,
+        daily_std_dev_raw=daily_std_raw
     )
 
 
