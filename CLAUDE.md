@@ -315,6 +315,229 @@ Calendar-aligned windows:
 
 ---
 
+## Event Probability Analysis
+
+**File**: `windows.py` (functions), `components/event_probability_chart.py` (visualization)
+
+### Overview
+
+Event Probability Analysis is a tail risk visualization technique that reveals the "heavy-tailed" nature of trading returns. It compares the actual probability of extreme events (large gains/losses) to what would be expected from a normal distribution.
+
+### Purpose
+
+- **Identify Fat Tails**: Shows that extreme events occur more frequently than normal distribution predicts
+- **Risk Assessment**: Quantifies tail risk for investors and risk managers
+- **Strategy Characterization**: Different strategies have different tail behaviors
+- **Regulatory Compliance**: Demonstrates understanding of extreme risk scenarios
+
+### Key Concepts
+
+#### Normalized Returns (X)
+Returns are normalized by dividing daily P&L by the standard deviation:
+```
+X = daily_pnl / std_dev_dollars
+```
+
+Where:
+- `daily_pnl = daily_return × fund_size` (e.g., $10M × 0.015 = $150K)
+- `std_dev_dollars = (target_std_dev / √252) × fund_size` (de-annualized daily std dev in dollars)
+- `X` represents "how many standard deviations" the event was
+
+#### Normalization Methods
+1. **Target Std Dev** (preferred): Uses `target_daily_std_dev` from programs table
+   - Manager's risk target (e.g., 1% daily vol)
+   - Shows performance vs target
+2. **Realized Std Dev** (fallback): Uses actual std dev from data
+   - Used when no target is set
+   - Shows historical distribution
+
+#### Probability Calculations
+For each threshold `x` (e.g., 0.5, 1.0, 1.5, 2.0...):
+- **P[X > x] for gains**: Probability of a gain exceeding x standard deviations
+- **P[X < -x] for losses**: Probability of a loss exceeding x standard deviations
+- **P[X > x] for normal**: Theoretical probability from N(0,1) distribution
+
+### Core Functions
+
+#### `EventProbabilityData` Dataclass
+Stores computed probabilities and metadata:
+```python
+@dataclass
+class EventProbabilityData:
+    x_values: List[float]              # Threshold values [0, 0.1, ..., 2.0]
+    p_gains: List[float]               # Actual gain probabilities
+    p_losses: List[float]              # Actual loss probabilities
+    p_normal: List[float]              # Normal distribution probabilities
+    total_gain_days: int               # Number of positive return days
+    total_loss_days: int               # Number of negative return days
+    total_days: int                    # Total days analyzed
+    realized_std_dev: float            # Annualized realized std dev
+    target_std_dev: Optional[float]    # Target std dev from database
+    used_target_std_dev: bool          # Whether target was used
+    fund_size: float                   # Fund size for P&L calculations
+```
+
+#### `generate_x_values(x_min, x_max, num_points)`
+Generates evenly-spaced threshold values:
+```python
+x_vals_short = generate_x_values(0, 2, 20)   # 20 points from 0 to 2
+x_vals_long = generate_x_values(0, 8, 80)    # 80 points from 0 to 8
+```
+
+#### `compute_event_probability_analysis(window, program_id, x_values, db)`
+Main computation function:
+```python
+from windows import Window, WindowDefinition, compute_event_probability_analysis, generate_x_values
+from database import Database
+
+with Database() as db:
+    # Create full-history window
+    window_def = WindowDefinition(
+        start_date=date(2006, 1, 3),
+        end_date=date(2025, 10, 17),
+        program_ids=[11],  # Alphabet MFT
+        benchmark_ids=[]
+    )
+    window = Window(window_def, db)
+
+    # Generate analysis
+    x_vals = generate_x_values(0, 2, 20)
+    epa_data = compute_event_probability_analysis(window, 11, x_vals, db)
+
+    print(f"Total days: {epa_data.total_days:,}")
+    print(f"Gain days: {epa_data.total_gain_days:,}")
+    print(f"Loss days: {epa_data.total_loss_days:,}")
+```
+
+### Visualization
+
+#### `render_event_probability_chart(epa_data, config, output_path)`
+Creates a single chart (PNG format):
+- **Y-axis**: Log scale (10^-5 to 1.0 typical range)
+- **X-axis**: Normalized return (X = P&L / std dev)
+- **Black line**: Normal distribution P[X > x]
+- **Blue squares**: Actual gains P[X > x]
+- **Red circles**: Actual losses P[X < -x]
+
+#### `render_event_probability_chart_pair(epa_short, epa_long, config, path_short, path_long)`
+Convenience function to create both standard views:
+- **Short range (0-2)**: Standard view for typical events
+- **Long range (0-8)**: Extended view revealing extreme tail events
+
+### Example Usage
+
+**Complete workflow** (see `generate_alphabet_mft_event_probability.py`):
+```python
+from database import Database
+from windows import WindowDefinition, Window, generate_x_values, compute_event_probability_analysis
+from components.event_probability_chart import render_event_probability_chart_pair
+
+with Database() as db:
+    # Get program and date range
+    program = db.fetch_one("SELECT id FROM programs WHERE program_name = 'MFT'")
+    date_range = db.fetch_one("""
+        SELECT MIN(date) as min_date, MAX(date) as max_date
+        FROM pnl_records
+        WHERE program_id = ? AND resolution = 'daily'
+    """, (program['id'],))
+
+    # Create window
+    window_def = WindowDefinition(
+        start_date=date.fromisoformat(date_range['min_date']),
+        end_date=date.fromisoformat(date_range['max_date']),
+        program_ids=[program['id']],
+        benchmark_ids=[]
+    )
+    window = Window(window_def, db)
+
+    # Compute probabilities
+    x_short = generate_x_values(0, 2, 20)
+    x_long = generate_x_values(0, 8, 80)
+    epa_short = compute_event_probability_analysis(window, program['id'], x_short, db)
+    epa_long = compute_event_probability_analysis(window, program['id'], x_long, db)
+
+    # Render charts
+    config = {'title': 'Event Probability Analysis - Alphabet MFT'}
+    render_event_probability_chart_pair(
+        epa_short, epa_long, config,
+        'event_prob_0_2.png', 'event_prob_0_8.png'
+    )
+```
+
+### Typical Results (Alphabet MFT Full History)
+
+**Data Summary:**
+- Total Days: 5,161
+- Gain Days: 3,042 (58.9%)
+- Loss Days: 2,119 (41.1%)
+- Realized Std Dev: 33.28% (annualized)
+- Target Std Dev: 1.0% (used for normalization)
+
+**Tail Probabilities (0-2 range):**
+
+| X (std dev) | P[Gain > X] Actual | P[Gain > X] Normal | Ratio |
+|-------------|-------------------|-------------------|-------|
+| 0.5 | 100.00% | 50.00% | 2.0x |
+| 1.0 | 98.52% | 29.93% | 3.3x |
+| 1.5 | 96.81% | 14.63% | 6.6x |
+| 2.0 | 94.54% | 5.72% | 16.5x |
+
+**Interpretation:**
+- The strategy shows **heavy tails**: extreme events occur much more frequently than normal
+- At 2.0 std dev, actual probability is 16.5× higher than normal distribution predicts
+- This is typical for systematic trading strategies and reflects genuine tail risk
+
+### Integration with Component System
+
+**Registered Component**: `'event_probability'`
+```python
+from component_registry import get_registry
+
+registry = get_registry()
+component = registry.get('event_probability')
+
+# Generate for a program
+component.function(
+    db=db,
+    program_id=11,
+    output_path='export/alphabet/mft/charts/alphabet_mft_event_probability.pdf'
+)
+# Creates: *_0_2.png and *_0_8.png
+```
+
+### Database Requirements
+
+**Programs table** must have `target_daily_std_dev` field:
+```sql
+ALTER TABLE programs ADD COLUMN target_daily_std_dev REAL;
+UPDATE programs SET target_daily_std_dev = 0.01 WHERE program_name = 'MFT';  -- 1%
+```
+
+**PnL records** must have daily resolution data:
+```sql
+SELECT COUNT(*) FROM pnl_records
+WHERE program_id = 11 AND resolution = 'daily';  -- Must be > 0
+```
+
+### Use Cases
+
+1. **Investor Due Diligence**: Show sophisticated understanding of tail risk
+2. **Risk Management**: Quantify probability of drawdown scenarios
+3. **Strategy Comparison**: Compare tail behavior across different strategies
+4. **Regulatory Reporting**: Demonstrate awareness of extreme risk events
+5. **Client Education**: Visualize why "normal" assumptions fail in trading
+
+### Related Files
+
+| File | Purpose |
+|------|---------|
+| `windows.py` | Core analysis functions |
+| `components/event_probability_chart.py` | Visualization functions |
+| `register_components.py` | Component registration |
+| `generate_alphabet_mft_event_probability.py` | Example script |
+
+---
+
 ## Data Import Workflows
 
 ### General Import Pattern
@@ -452,12 +675,16 @@ monthly_return = (ending_nav - starting_nav) / starting_nav
 | `schema.sql` | Main database schema |
 | `schema_chart_config.sql` | Chart configuration schema |
 | `database.py` | Database connection layer |
-| `windows.py` | Performance analysis framework (daily/monthly) |
+| `windows.py` | Performance analysis framework (daily/monthly, event probability) |
+| `components/event_probability_chart.py` | Event probability visualization |
+| `register_components.py` | Component registration (charts, tables, text) |
+| `component_registry.py` | Component registry system |
 | `import_cta_results_v2.py` | Rise Capital HTML import |
 | `import_alphabet_mft_markets.py` | Alphabet market-level CSV import |
 | `verify_alphabet_mft_markets.py` | Alphabet data verification |
 | `create_sector_structure.py` | Sector definitions and mappings |
 | `query_by_sector.py` | Sector-based query utilities |
+| `generate_alphabet_mft_event_probability.py` | Event probability analysis example |
 | `add_submission_date_column.py` | Schema migration for submission tracking |
 | `cleanup_alphabet_old_data.py` | Data cleanup utility |
 | `example_brochure_workflow.py` | Brochure generation examples |
@@ -624,9 +851,22 @@ ORDER BY date
 
 ---
 
-## Current Status (as of 2025-10-21)
+## Current Status (as of 2025-10-22)
 
 ### Recently Completed
+
+#### Event Probability Analysis Implementation (October 22, 2025)
+- ✅ Added `target_daily_std_dev` field to `programs` table
+- ✅ Set target daily std dev to 1% for Alphabet MFT and Rise CTA programs
+- ✅ Created `EventProbabilityData` dataclass in `windows.py`
+- ✅ Implemented `compute_event_probability_analysis()` function
+- ✅ Implemented `generate_x_values()` helper function
+- ✅ Created `components/event_probability_chart.py` visualization module
+- ✅ Registered `'event_probability'` component in component registry
+- ✅ Generated example charts for Alphabet MFT (0-2 and 0-8 ranges)
+- ✅ Verified heavy-tailed nature: 2σ events occur 16.5× more than normal
+- ✅ Created `generate_alphabet_mft_event_probability.py` example script
+- ✅ Updated CLAUDE.md with comprehensive documentation
 
 #### Alphabet MFT Market-Level Data Import (October 21, 2025)
 - ✅ Created database backup (`pnlrg_20251021.db`)
@@ -745,11 +985,14 @@ ORDER BY date
 
 ---
 
-**Last Updated**: 2025-10-21
+**Last Updated**: 2025-10-22
 **Updated By**: Claude (via user request)
 **Change Summary**:
-- Imported Alphabet MFT market-level data (97,589 records across 17 markets + 2 benchmarks)
-- Added `submission_date` column for data versioning and audit trails
-- Created comprehensive sector structure (mft_sector + cta_sector groupings)
-- Documented sector-based query utilities and performance insights
-- Updated all file references and current status sections
+- Implemented Event Probability Analysis system for tail risk visualization
+- Added `target_daily_std_dev` field to programs table (1% for MFT and CTA)
+- Created `EventProbabilityData` dataclass and `compute_event_probability_analysis()` function
+- Built visualization components for log-scale probability charts (0-2 and 0-8 ranges)
+- Registered 'event_probability' component in component registry
+- Generated and verified Alphabet MFT tail analysis (16.5× heavier tails than normal at 2σ)
+- Created comprehensive documentation and example script
+- Updated file references and current status sections

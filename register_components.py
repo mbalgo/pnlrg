@@ -16,7 +16,15 @@ from components.pdf_tables import (
     create_windows_performance_table_pdf,
     create_summary_statistics_table_pdf
 )
-from windows import generate_window_definitions_non_overlapping_reverse, compute_statistics
+from components.event_probability_chart import render_event_probability_chart_pair
+from windows import (
+    generate_window_definitions_non_overlapping_reverse,
+    compute_statistics,
+    WindowDefinition,
+    Window,
+    generate_x_values,
+    compute_event_probability_analysis
+)
 import plotly.graph_objects as go
 from database import Database
 from datetime import date
@@ -279,6 +287,93 @@ def generate_monthly_performance(db, program_id, output_path, benchmarks=None, v
     raise NotImplementedError("Monthly performance chart not yet implemented")
 
 
+def generate_event_probability_analysis(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """
+    Generate event probability analysis charts (both 0-2 and 0-8 ranges).
+
+    Creates two PNG charts showing the probability of extreme events compared to
+    a normal distribution. Reveals "fat tails" in the return distribution.
+
+    Args:
+        db: Database instance
+        program_id: Program ID to analyze
+        output_path: Base output path (will create two files: *_0_2.png and *_0_8.png)
+        benchmarks: Not used for this component
+        variant: Not used for this component
+        **kwargs: Additional arguments (ignored)
+
+    Returns:
+        Tuple of (short_range_path, long_range_path)
+    """
+    # Get program metadata
+    program = db.fetch_one("""
+        SELECT p.id, p.program_name, p.fund_size, m.manager_name
+        FROM programs p
+        JOIN managers m ON p.manager_id = m.id
+        WHERE p.id = ?
+    """, (program_id,))
+
+    if not program:
+        raise ValueError(f"Program ID {program_id} not found")
+
+    # Get data range
+    date_range = db.fetch_one("""
+        SELECT MIN(date) as min_date, MAX(date) as max_date
+        FROM pnl_records
+        WHERE program_id = ? AND resolution = 'daily'
+    """, (program_id,))
+
+    if not date_range or not date_range['min_date']:
+        raise ValueError(f"No daily data found for program {program_id}")
+
+    min_date = date.fromisoformat(date_range['min_date'])
+    max_date = date.fromisoformat(date_range['max_date'])
+
+    # Create full-history window
+    window_def = WindowDefinition(
+        start_date=min_date,
+        end_date=max_date,
+        program_ids=[program_id],
+        benchmark_ids=[],
+        name="Full History"
+    )
+    window = Window(window_def, db)
+
+    # Generate x values for both ranges
+    x_vals_short = generate_x_values(0, 2, 20)
+    x_vals_long = generate_x_values(0, 8, 80)
+
+    # Compute event probability analysis
+    epa_short = compute_event_probability_analysis(window, program_id, x_vals_short, db)
+    epa_long = compute_event_probability_analysis(window, program_id, x_vals_long, db)
+
+    # Generate output paths
+    # output_path will be something like: export/alphabet/mft/charts/alphabet_mft_event_probability.pdf
+    # We need to change extension to .png and add range suffixes
+    base_path = str(output_path).replace('.pdf', '')
+    output_path_short = f"{base_path}_0_2.png"
+    output_path_long = f"{base_path}_0_8.png"
+
+    # Configuration
+    config = {
+        'title': f'{program["manager_name"]} {program["program_name"]} - Event Probability Analysis',
+        'figsize': (12, 8),
+        'dpi': 300
+    }
+
+    # Render both charts
+    render_event_probability_chart_pair(
+        epa_short, epa_long, config,
+        output_path_short, output_path_long
+    )
+
+    print(f"Event probability charts generated:")
+    print(f"  Short range (0-2): {output_path_short}")
+    print(f"  Long range (0-8): {output_path_long}")
+
+    return (output_path_short, output_path_long)
+
+
 # =============================================================================
 # Table Component Implementations
 # =============================================================================
@@ -500,6 +595,16 @@ def register_all_components():
         function=generate_equity_curve_full_history,
         benchmark_support=True,
         benchmark_combinations=[[], ['sp500'], ['btop50'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='event_probability',
+        name='Event Probability Analysis',
+        category='chart',
+        description='Tail risk analysis showing probability of extreme events vs normal distribution',
+        function=generate_event_probability_analysis,
+        benchmark_support=False,
         version='1.0.0'
     )
 

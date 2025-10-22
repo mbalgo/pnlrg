@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS programs (
     fund_size REAL,
     starting_nav REAL,      -- Starting NAV for the equity curve (e.g., 1000)
     starting_date DATE,     -- First date of the equity curve
+    target_daily_std_dev REAL,  -- Target standard deviation of daily returns (e.g., 0.01 for 1%)
     manager_id INTEGER NOT NULL,
     FOREIGN KEY (manager_id) REFERENCES managers(id) ON DELETE RESTRICT
 );

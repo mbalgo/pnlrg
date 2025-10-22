@@ -18,6 +18,7 @@ from datetime import date
 import pandas as pd
 import numpy as np
 from dateutil.relativedelta import relativedelta
+from scipy import stats
 
 
 @dataclass
@@ -115,6 +116,41 @@ class Statistics:
     cagr: float = 0.0
     daily_count: int = 0
     daily_std_dev_raw: float = 0.0
+
+
+@dataclass
+class EventProbabilityData:
+    """
+    Event probability analysis data for tail risk visualization.
+
+    Analyzes the probability of extreme events (gains/losses) compared to
+    a normal distribution. X represents normalized returns (daily P&L divided
+    by standard deviation).
+
+    Attributes:
+        x_values: Array of threshold values (e.g., [0, 0.1, 0.2, ..., 2.0])
+        p_gains: Probability of gain exceeding each x value: P[X > x]
+        p_losses: Probability of loss exceeding each x value: P[X < -x]
+        p_normal: Theoretical normal distribution probabilities: P[|X| > x]
+        total_gain_days: Number of days with positive returns
+        total_loss_days: Number of days with negative returns
+        total_days: Total number of days in analysis
+        realized_std_dev: Actual standard deviation of daily returns (annualized)
+        target_std_dev: Target standard deviation from program configuration
+        used_target_std_dev: Whether target std dev was used (True) or realized (False)
+        fund_size: Fund size used for P&L calculations
+    """
+    x_values: List[float]
+    p_gains: List[float]
+    p_losses: List[float]
+    p_normal: List[float]
+    total_gain_days: int
+    total_loss_days: int
+    total_days: int
+    realized_std_dev: float
+    target_std_dev: Optional[float]
+    used_target_std_dev: bool
+    fund_size: float
 
 
 class Window:
@@ -1144,3 +1180,172 @@ def generate_window_definitions_bespoke(
         windows.append(win_def)
 
     return windows
+
+
+# =============================================================================
+# Event Probability Analysis Functions
+# =============================================================================
+
+def generate_x_values(x_min: float, x_max: float, num_points: int) -> List[float]:
+    """
+    Generate evenly-spaced x values for event probability analysis.
+
+    Args:
+        x_min: Minimum x value (typically 0)
+        x_max: Maximum x value (e.g., 2.0 or 8.0)
+        num_points: Number of points to generate
+
+    Returns:
+        List of x values
+    """
+    if num_points < 2:
+        raise ValueError("num_points must be at least 2")
+
+    return [x_min + i * (x_max - x_min) / (num_points - 1) for i in range(num_points)]
+
+
+def compute_event_probability_analysis(
+    window: Window,
+    program_id: int,
+    x_values: List[float],
+    db
+) -> EventProbabilityData:
+    """
+    Compute event probability analysis for a program.
+
+    This analysis shows the probability of extreme events (large gains/losses)
+    compared to what would be expected from a normal distribution. It reveals
+    "fat tails" - extreme events that occur more frequently than normal.
+
+    Process:
+    1. Fetch daily returns for the program (aggregated across all markets)
+    2. Get program's fund_size and target_daily_std_dev from database
+    3. Convert returns to dollar P&L: daily_pnl = daily_return * fund_size
+    4. Get normalization factor (target std dev or realized std dev)
+    5. Normalize: X = daily_pnl / std_dev_dollars
+    6. Split into gains (X > 0) and losses (X < 0)
+    7. For each x threshold, calculate:
+       - P[X > x] for gains
+       - P[X < -x] for losses
+       - P[|X| > x] for normal distribution
+
+    Args:
+        window: Time window to analyze
+        program_id: Program ID to analyze
+        x_values: List of x thresholds to evaluate (e.g., [0, 0.1, 0.2, ..., 2.0])
+        db: Database instance
+
+    Returns:
+        EventProbabilityData object with probabilities and metadata
+
+    Example:
+        >>> from windows import WindowDefinition, Window, generate_x_values
+        >>> win_def = WindowDefinition(
+        ...     start_date=date(2006, 1, 3),
+        ...     end_date=date(2025, 10, 17),
+        ...     program_ids=[11],
+        ...     benchmark_ids=[]
+        ... )
+        >>> window = Window(win_def, db)
+        >>> x_vals = generate_x_values(0, 2, 20)
+        >>> epa = compute_event_probability_analysis(window, 11, x_vals, db)
+        >>> print(f"Total days: {epa.total_days}")
+        >>> print(f"Gain days: {epa.total_gain_days}, Loss days: {epa.total_loss_days}")
+    """
+    # Step 1: Get daily returns (aggregated across all markets)
+    daily_df = window.get_manager_daily_data(program_id)
+
+    if daily_df is None or len(daily_df) == 0:
+        raise ValueError(f"No daily data available for program {program_id} in this window")
+
+    # Step 2: Get program metadata
+    program = db.fetch_one(
+        "SELECT fund_size, target_daily_std_dev FROM programs WHERE id = ?",
+        (program_id,)
+    )
+
+    if not program:
+        raise ValueError(f"Program {program_id} not found in database")
+
+    fund_size = program['fund_size']
+    target_std_dev = program['target_daily_std_dev']  # Can be None
+
+    if fund_size is None or fund_size == 0:
+        raise ValueError(f"Program {program_id} has no fund_size configured")
+
+    # Step 3: Convert returns to dollar P&L
+    daily_returns = daily_df['return'].values
+    daily_pnl = daily_returns * fund_size
+
+    # Step 4: Calculate realized mean and std dev (for reference and fallback)
+    realized_mean = float(daily_returns.mean())
+    realized_std_dev_raw = float(daily_returns.std(ddof=1))
+    realized_std_dev_annualized = annualize_daily_std(realized_std_dev_raw)
+
+    # Step 5: Use realized std dev for normalization
+    # Event probability analysis shows actual tail behavior,
+    # so we must normalize by the actual (realized) std dev, not the target.
+    # This gives us proper z-scores showing how many std devs each event was.
+    daily_std_dev_for_norm = realized_std_dev_raw
+    used_target = False  # Always use realized for this analysis
+
+    # Convert daily std dev and mean to dollars
+    mean_pnl = realized_mean * fund_size
+    std_dev_dollars = daily_std_dev_for_norm * fund_size
+
+    # Step 6: Normalize P&L to get X values
+    # DO NOT subtract mean - we want to preserve the positive drift!
+    # Subtracting mean would center the distribution and hide where profits come from
+    X = daily_pnl / std_dev_dollars
+
+    # Step 7: Split into gains and losses
+    gains = X[X > 0]
+    losses = X[X < 0]
+
+    total_days = len(X)
+    total_gain_days = len(gains)
+    total_loss_days = len(losses)
+
+    # Step 8: Calculate probabilities for each x threshold
+    p_gains = []
+    p_losses = []
+    p_normal = []
+
+    for x in x_values:
+        # P[X > x] for gains
+        # This is the probability that on any given day, you have a gain exceeding x std dev
+        if total_days > 0:
+            p_gain = (gains > x).sum() / total_days
+        else:
+            p_gain = 0.0
+        p_gains.append(float(p_gain))
+
+        # P[X < -x] for losses (note: losses are negative, so we check if they're < -x)
+        # This is the probability that on any given day, you have a loss exceeding x std dev
+        if total_days > 0:
+            p_loss = (losses < -x).sum() / total_days
+        else:
+            p_loss = 0.0
+        p_losses.append(float(p_loss))
+
+        # P[|X| > x] for normal distribution (mean=0, std=1)
+        # This is the survival function: 1 - CDF(x)
+        # For a standard normal, P[X > x] = 1 - Phi(x)
+        # Since normal is symmetric, P[|X| > x] = 2 * (1 - Phi(x)) for x > 0
+        # But we want the one-sided probability to match the gains/losses calculation
+        p_norm = stats.norm.sf(x)  # Survival function: P[X > x] for standard normal
+        p_normal.append(float(p_norm))
+
+    return EventProbabilityData(
+        x_values=x_values,
+        p_gains=p_gains,
+        p_losses=p_losses,
+        p_normal=p_normal,
+        total_gain_days=total_gain_days,
+        total_loss_days=total_loss_days,
+        total_days=total_days,
+        realized_std_dev=realized_std_dev_annualized,
+        target_std_dev=target_std_dev,
+        used_target_std_dev=used_target,
+        fund_size=fund_size
+    )
