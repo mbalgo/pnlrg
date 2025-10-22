@@ -36,6 +36,8 @@ class WindowDefinition:
         name: Optional descriptive name for this window
         window_set: Optional name of the window set this belongs to
         index: Optional position within the window set
+        borrowed_data_start_date: Start of borrowed/overlapped data (if applicable)
+        borrowed_data_end_date: End of borrowed/overlapped data (if applicable)
     """
     start_date: date
     end_date: date
@@ -44,6 +46,8 @@ class WindowDefinition:
     name: Optional[str] = None
     window_set: Optional[str] = None
     index: Optional[int] = None
+    borrowed_data_start_date: Optional[date] = None
+    borrowed_data_end_date: Optional[date] = None
 
     def to_dict(self) -> dict:
         """Serialize to JSON-compatible dict."""
@@ -54,7 +58,9 @@ class WindowDefinition:
             'benchmark_ids': self.benchmark_ids,
             'name': self.name,
             'window_set': self.window_set,
-            'index': self.index
+            'index': self.index,
+            'borrowed_data_start_date': self.borrowed_data_start_date.isoformat() if self.borrowed_data_start_date else None,
+            'borrowed_data_end_date': self.borrowed_data_end_date.isoformat() if self.borrowed_data_end_date else None
         }
 
     @classmethod
@@ -67,7 +73,9 @@ class WindowDefinition:
             benchmark_ids=d['benchmark_ids'],
             name=d.get('name'),
             window_set=d.get('window_set'),
-            index=d.get('index')
+            index=d.get('index'),
+            borrowed_data_start_date=date.fromisoformat(d['borrowed_data_start_date']) if d.get('borrowed_data_start_date') else None,
+            borrowed_data_end_date=date.fromisoformat(d['borrowed_data_end_date']) if d.get('borrowed_data_end_date') else None
         )
 
 
@@ -786,7 +794,8 @@ def generate_window_definitions_non_overlapping_reverse(
     window_length_years: int,
     program_ids: List[int],
     benchmark_ids: List[int],
-    window_set_name: Optional[str] = None
+    window_set_name: Optional[str] = None,
+    borrow_mode: bool = False
 ) -> List[WindowDefinition]:
     """
     Generate non-overlapping windows working backwards from the latest date.
@@ -795,6 +804,11 @@ def generate_window_definitions_non_overlapping_reverse(
     exactly at latest_date and spans a full window_length_years period. Then
     works backwards creating non-overlapping windows until earliest_date is reached.
 
+    When borrow_mode=True, if the earliest window is incomplete (shorter than
+    window_length_years), its end_date is extended forward to overlap with the
+    next window, making it a complete window. The overlapping period is marked
+    with borrowed_data_start_date and borrowed_data_end_date for visualization.
+
     Args:
         earliest_date: Earliest date in the dataset
         latest_date: Latest date in the dataset (end of most recent window)
@@ -802,36 +816,55 @@ def generate_window_definitions_non_overlapping_reverse(
         program_ids: Programs to include in analysis
         benchmark_ids: Benchmarks to include in analysis
         window_set_name: Optional name for this set of windows
+        borrow_mode: If True, extend incomplete earliest window by borrowing from next window
 
     Returns:
         List of WindowDefinition objects in chronological order (oldest first)
 
-    Example:
-        >>> # Data from 1973-01-31 to 2017-12-22
+    Example (borrow_mode=False):
+        >>> # Data from 2006-01-01 to 2020-12-31, 5-year windows
         >>> windows = generate_window_definitions_non_overlapping_reverse(
-        ...     earliest_date=date(1973, 1, 31),
-        ...     latest_date=date(2017, 12, 22),
+        ...     earliest_date=date(2006, 1, 1),
+        ...     latest_date=date(2020, 12, 31),
         ...     window_length_years=5,
         ...     program_ids=[1],
-        ...     benchmark_ids=[2, 3]
+        ...     benchmark_ids=[2]
         ... )
-        >>> # Returns windows ending at:
-        >>> # 2017-12-22 (last 5 years)
-        >>> # 2012-12-22 (previous 5 years)
-        >>> # 2007-12-22, 2002-12-22, etc.
-        >>> # Until we can't fit another full 5-year window
+        >>> # Returns:
+        >>> # Window 3: 2006-01-01 to 2009-12-31 (4 years, incomplete)
+        >>> # Window 2: 2010-01-01 to 2014-12-31 (5 years)
+        >>> # Window 1: 2015-01-01 to 2020-12-31 (5 years)
+
+    Example (borrow_mode=True):
+        >>> # Same data, but with borrow_mode=True
+        >>> windows = generate_window_definitions_non_overlapping_reverse(
+        ...     earliest_date=date(2006, 1, 1),
+        ...     latest_date=date(2020, 12, 31),
+        ...     window_length_years=5,
+        ...     program_ids=[1],
+        ...     benchmark_ids=[2],
+        ...     borrow_mode=True
+        ... )
+        >>> # Returns:
+        >>> # Window 3: 2006-01-01 to 2010-12-31 (5 years)
+        >>> #   borrowed_data_start_date=2010-01-01
+        >>> #   borrowed_data_end_date=2010-12-31
+        >>> # Window 2: 2010-01-01 to 2014-12-31 (5 years)
+        >>> # Window 1: 2015-01-01 to 2020-12-31 (5 years)
     """
     windows = []
     current_end = latest_date
     index = 0
+    last_complete_window_start = None
 
     while True:
         # Calculate start date (exactly window_length_years before end)
         win_start = current_end - relativedelta(years=window_length_years)
 
-        # If this window starts before our earliest data, stop
-        # We only want complete windows
+        # If this window starts before our earliest data
         if win_start < earliest_date:
+            # Save the start date of the last complete window we created
+            last_complete_window_start = current_end
             break
 
         # Create window definition
@@ -851,12 +884,56 @@ def generate_window_definitions_non_overlapping_reverse(
         current_end = win_start - relativedelta(days=1)
         index += 1
 
+    # Check if there's still data before the last complete window
+    # If so, create an incomplete window starting from earliest_date
+    if last_complete_window_start is not None:
+        potential_incomplete_end = last_complete_window_start - relativedelta(days=1)
+        if potential_incomplete_end >= earliest_date:
+            # There's data for an incomplete window
+            win_def = WindowDefinition(
+                start_date=earliest_date,
+                end_date=potential_incomplete_end,
+                program_ids=program_ids.copy(),
+                benchmark_ids=benchmark_ids.copy(),
+                name=f"Period ending {potential_incomplete_end.strftime('%Y-%m-%d')}",
+                window_set=window_set_name,
+                index=index
+            )
+            windows.append(win_def)
+
     # Reverse to return in chronological order (oldest first)
     windows.reverse()
 
     # Re-index after reversing
     for i, win in enumerate(windows):
         win.index = i
+
+    # Handle borrow_mode: extend earliest window if incomplete
+    if borrow_mode and len(windows) > 1:
+        earliest_window = windows[0]
+
+        # Check if earliest window is incomplete
+        # (i.e., its start_date is later than what a full window would require)
+        ideal_start = earliest_window.end_date - relativedelta(years=window_length_years)
+
+        if earliest_window.start_date > ideal_start:
+            # Window is incomplete - need to borrow data
+            # Calculate how much we need to extend the end_date to make it complete
+            actual_duration_days = (earliest_window.end_date - earliest_window.start_date).days
+            target_duration_days = (earliest_window.end_date - ideal_start).days
+            shortage_days = target_duration_days - actual_duration_days
+
+            # Extend end_date forward to borrow from next window
+            new_end_date = earliest_window.end_date + relativedelta(days=shortage_days)
+
+            # The borrowed period is from the old end_date + 1 day to new end_date
+            borrowed_start = earliest_window.end_date + relativedelta(days=1)
+            borrowed_end = new_end_date
+
+            # Update the window
+            earliest_window.end_date = new_end_date
+            earliest_window.borrowed_data_start_date = borrowed_start
+            earliest_window.borrowed_data_end_date = borrowed_end
 
     return windows
 
