@@ -341,6 +341,9 @@ class Window:
         This is the new primary method for fetching data, as industry standard
         statistics (especially std dev) should be calculated from daily returns.
 
+        IMPORTANT: Excludes benchmark markets (is_benchmark=1) from aggregation.
+        Only trading markets contribute to manager performance.
+
         Args:
             program_id: Program ID to fetch
 
@@ -352,14 +355,16 @@ class Window:
             self._daily_manager_data = {}
 
         if cache_key not in self._daily_manager_data:
-            # Query database for DAILY returns, aggregated across all markets
+            # Query database for DAILY returns, aggregated across all NON-BENCHMARK markets
             results = self.db.fetch_all("""
                 SELECT pr.date, SUM(pr.return) as total_return
                 FROM pnl_records pr
+                JOIN markets m ON pr.market_id = m.id
                 WHERE pr.program_id = ?
                 AND pr.resolution = 'daily'
                 AND pr.date >= ?
                 AND pr.date <= ?
+                AND m.is_benchmark = 0
                 GROUP BY pr.date
                 ORDER BY pr.date
             """, (program_id, self.definition.start_date, self.definition.end_date))
