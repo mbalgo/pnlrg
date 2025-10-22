@@ -104,7 +104,7 @@ def render_event_probability_chart(
 
     # Set axis labels
     ax.set_xlabel(
-        'Amount lost or gained overnight divided by\nthe Target Standard Deviation of Daily Returns',
+        'Amount lost or gained overnight divided by\nthe Realized Standard Deviation of Daily Returns',
         fontsize=11,
         fontweight='bold'
     )
