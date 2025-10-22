@@ -30,6 +30,13 @@ def format_decimal(value: float, decimals: int = 2) -> str:
     return f"{value:.{decimals}f}"
 
 
+def format_number_only(value: float, decimals: int = 2) -> str:
+    """Format value as number without % suffix (0.0523 -> '5.23')."""
+    if np.isnan(value):
+        return 'N/A'
+    return f"{value * 100:.{decimals}f}"
+
+
 def format_integer(value: int) -> str:
     """Format an integer with thousand separators."""
     return f"{value:,}"
@@ -120,11 +127,11 @@ def create_windows_performance_table_pdf(
     header = [
         'Window Period',
         'Trading\nDays',
-        'Mean\nMonthly',
-        'Std Dev\nDaily',
-        'Max\nDrawdown',
+        'Mean\nMonthly (%)',
+        'Std Dev\nDaily (%)',
+        'Max\nDrawdown (%)',
         'Sharpe\nRatio',
-        'CAGR'
+        'CAGR (%)'
     ]
 
     table_data = [header]
@@ -133,11 +140,11 @@ def create_windows_performance_table_pdf(
         row = [
             ws['window_name'],
             format_integer(ws['daily_count']),
-            format_percentage(ws['mean_monthly'], 2),
-            format_percentage(ws['std_daily'], 4),  # More precision for daily std
-            format_percentage(ws['max_dd'], 2),
+            format_number_only(ws['mean_monthly'], 2),  # No % suffix
+            format_number_only(ws['std_daily'], 2),     # 2 decimals (was 4)
+            format_number_only(ws['max_dd'], 2),        # No % suffix
             format_decimal(ws['sharpe'], 2),
-            format_percentage(ws['cagr'], 2)
+            format_number_only(ws['cagr'], 0)           # 0 decimals (whole number)
         ]
 
         # Add asterisk if borrowed data

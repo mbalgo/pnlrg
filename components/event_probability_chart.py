@@ -134,11 +134,17 @@ def render_event_probability_chart(
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda y, _: f'{y:.5g}'))
 
     # Add data info text box (bottom right)
+    target_line = ""
+    if epa_data.target_std_dev is not None:
+        target_dollars = epa_data.target_std_dev * epa_data.fund_size
+        target_line = f"\nTarget Std Dev: ${target_dollars:,.0f} ({epa_data.target_std_dev*100:.2f}%)"
+
     info_text = (
         f"Total Days: {epa_data.total_days:,}\n"
         f"Gain Days: {epa_data.total_gain_days:,} ({100*epa_data.total_gain_days/epa_data.total_days:.1f}%)\n"
         f"Loss Days: {epa_data.total_loss_days:,} ({100*epa_data.total_loss_days/epa_data.total_days:.1f}%)\n"
         f"Fund Size: ${epa_data.fund_size:,.0f}"
+        f"{target_line}"
     )
     ax.text(
         0.98, 0.02,

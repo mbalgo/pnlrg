@@ -210,10 +210,13 @@ def _generate_cumulative_windows_chart(
 
     # Layout
     calc_type = "Compounded" if compounded else "Additive (Non-Compounded)"
-    title = f"{program['manager_name']} {program['program_name']} - Cumulative Performance by 5-Year Window ({calc_type})"
+    title = f"{program['manager_name']} {program['program_name']} - Cumulative Performance in 5-Year Windows ({calc_type})"
 
-    benchmark_desc = f" {benchmarks[0].upper()}" if benchmarks else ""
-    subtitle = f"Starting NAV: ${program['starting_nav']:,.0f}. {calc_type} returns. Solid: Strategy. Dashed:{benchmark_desc} Benchmark. Dotted: Borrowed data."
+    if benchmarks:
+        benchmark_desc = f" Dashed: {benchmarks[0].upper()} Benchmark."
+    else:
+        benchmark_desc = ""
+    subtitle = f"Starting NAV: ${program['starting_nav']:,.0f}. {calc_type} returns. Solid: Strategy.{benchmark_desc} Dotted: Borrowed data."
 
     fig.update_layout(
         title={'text': title, 'x': 0.5, 'xanchor': 'center', 'font': {'size': 20}},
@@ -419,44 +422,97 @@ def generate_windows_performance_table(db, program_id, output_path, benchmarks=N
     )
 
     # Compute statistics for each window
-    from windows import Window
+    from windows import Window, WindowDefinition
+    from datetime import timedelta
     windows_stats = []
 
     for wd in window_defs:
-        window = Window(wd, db)
-        stats = compute_statistics(window, program_id, entity_type='manager')
+        # If window has borrowed data, create TWO rows: one without borrowed, one with
+        if wd.borrowed_data_start_date:
+            # Row 1: Non-borrowed period (actual data only)
+            non_borrowed_def = WindowDefinition(
+                start_date=wd.start_date,
+                end_date=wd.borrowed_data_start_date - timedelta(days=1),
+                program_ids=wd.program_ids,
+                benchmark_ids=wd.benchmark_ids,
+                name=f"{wd.name} (non-borrowed)"
+            )
+            non_borrowed_window = Window(non_borrowed_def, db)
+            non_borrowed_stats = compute_statistics(non_borrowed_window, program_id, entity_type='manager')
 
-        # Calculate Sharpe ratio: sqrt(261) * mean / std_daily
-        # We have annualized std, so we need to de-annualize it first
-        # annualized_std = daily_std * sqrt(252)
-        # daily_std = annualized_std / sqrt(252)
-        # Sharpe = sqrt(261) * mean_monthly / daily_std
-        # But actually, for monthly Sharpe:
-        # Sharpe = sqrt(12) * mean_monthly / std_monthly
-        # Let's use the standard formula: sqrt(252) * daily_mean / daily_std
+            # Get daily returns for Sharpe calculation
+            daily_df_nb = non_borrowed_window.get_manager_daily_data(program_id)
+            if len(daily_df_nb) > 0:
+                daily_mean_nb = daily_df_nb['return'].mean()
+                daily_std_nb = daily_df_nb['return'].std()
+                sharpe_nb = (daily_mean_nb / daily_std_nb * (261 ** 0.5)) if daily_std_nb > 0 else 0.0
+            else:
+                daily_std_nb = 0.0
+                sharpe_nb = 0.0
 
-        # Get daily returns for proper Sharpe calculation
-        daily_df = window.get_manager_daily_data(program_id)
-        if len(daily_df) > 0:
-            daily_mean = daily_df['return'].mean()
-            daily_std = daily_df['return'].std()
-            sharpe = (daily_mean / daily_std * (261 ** 0.5)) if daily_std > 0 else 0.0
+            # Add non-borrowed row
+            windows_stats.append({
+                'window_name': f"{non_borrowed_def.start_date.strftime('%Y-%m-%d')} to {non_borrowed_def.end_date.strftime('%Y-%m-%d')}",
+                'daily_count': non_borrowed_stats.daily_count if non_borrowed_stats.daily_count > 0 else non_borrowed_stats.count * 21,
+                'mean_monthly': non_borrowed_stats.mean,
+                'std_daily': daily_std_nb,
+                'max_dd': non_borrowed_stats.max_drawdown_compounded,
+                'sharpe': sharpe_nb,
+                'cagr': non_borrowed_stats.cagr,
+                'borrowed': False
+            })
+
+            # Row 2: Full window with borrowed data
+            full_window = Window(wd, db)
+            full_stats = compute_statistics(full_window, program_id, entity_type='manager')
+
+            daily_df_full = full_window.get_manager_daily_data(program_id)
+            if len(daily_df_full) > 0:
+                daily_mean_full = daily_df_full['return'].mean()
+                daily_std_full = daily_df_full['return'].std()
+                sharpe_full = (daily_mean_full / daily_std_full * (261 ** 0.5)) if daily_std_full > 0 else 0.0
+            else:
+                daily_std_full = 0.0
+                sharpe_full = 0.0
+
+            # Add borrowed row (with asterisk)
+            windows_stats.append({
+                'window_name': f"{wd.start_date.strftime('%Y-%m-%d')} to {wd.end_date.strftime('%Y-%m-%d')}",
+                'daily_count': full_stats.daily_count if full_stats.daily_count > 0 else full_stats.count * 21,
+                'mean_monthly': full_stats.mean,
+                'std_daily': daily_std_full,
+                'max_dd': full_stats.max_drawdown_compounded,
+                'sharpe': sharpe_full,
+                'cagr': full_stats.cagr,
+                'borrowed': True
+            })
         else:
-            daily_std = 0.0
-            sharpe = 0.0
+            # Normal window - no borrowed data
+            window = Window(wd, db)
+            stats = compute_statistics(window, program_id, entity_type='manager')
 
-        window_stats = {
-            'window_name': f"{wd.start_date.strftime('%Y-%m-%d')} to {wd.end_date.strftime('%Y-%m-%d')}",
-            'daily_count': stats.daily_count if stats.daily_count > 0 else stats.count * 21,  # Estimate
-            'mean_monthly': stats.mean,
-            'std_daily': daily_std,  # Not annualized
-            'max_dd': stats.max_drawdown_compounded,
-            'sharpe': sharpe,
-            'cagr': stats.cagr,
-            'borrowed': wd.borrowed_data_start_date is not None
-        }
+            # Get daily returns for proper Sharpe calculation
+            daily_df = window.get_manager_daily_data(program_id)
+            if len(daily_df) > 0:
+                daily_mean = daily_df['return'].mean()
+                daily_std = daily_df['return'].std()
+                sharpe = (daily_mean / daily_std * (261 ** 0.5)) if daily_std > 0 else 0.0
+            else:
+                daily_std = 0.0
+                sharpe = 0.0
 
-        windows_stats.append(window_stats)
+            window_stats = {
+                'window_name': f"{wd.start_date.strftime('%Y-%m-%d')} to {wd.end_date.strftime('%Y-%m-%d')}",
+                'daily_count': stats.daily_count if stats.daily_count > 0 else stats.count * 21,
+                'mean_monthly': stats.mean,
+                'std_daily': daily_std,
+                'max_dd': stats.max_drawdown_compounded,
+                'sharpe': sharpe,
+                'cagr': stats.cagr,
+                'borrowed': False
+            }
+
+            windows_stats.append(window_stats)
 
     # Generate PDF table
     create_windows_performance_table_pdf(
@@ -565,16 +621,17 @@ def register_all_components():
     """Register all available components with the global registry."""
 
     # CHARTS
-    register_component(
-        id='cumulative_windows_5yr_compounded',
-        name='Cumulative Windows Overlay (5-Year, Compounded)',
-        category='chart',
-        description='5-year non-overlapping windows with compounded returns, using borrow_mode',
-        function=generate_cumulative_windows_5yr_compounded,
-        benchmark_support=True,
-        benchmark_combinations=[[], ['sp500'], ['areit'], ['sp500', 'areit']],
-        version='1.0.0'
-    )
+    # Compounded variant commented out - keeping additive only for now
+    # register_component(
+    #     id='cumulative_windows_5yr_compounded',
+    #     name='Cumulative Windows Overlay (5-Year, Compounded)',
+    #     category='chart',
+    #     description='5-year non-overlapping windows with compounded returns, using borrow_mode',
+    #     function=generate_cumulative_windows_5yr_compounded,
+    #     benchmark_support=True,
+    #     benchmark_combinations=[[], ['sp500'], ['areit']],
+    #     version='1.0.0'
+    # )
 
     register_component(
         id='cumulative_windows_5yr_additive',
@@ -583,7 +640,7 @@ def register_all_components():
         description='5-year non-overlapping windows with additive returns, using borrow_mode',
         function=generate_cumulative_windows_5yr_additive,
         benchmark_support=True,
-        benchmark_combinations=[[], ['sp500'], ['areit'], ['sp500', 'areit']],
+        benchmark_combinations=[[], ['sp500'], ['areit']],
         version='1.0.0'
     )
 
