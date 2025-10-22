@@ -349,10 +349,10 @@ def generate_event_probability_analysis(db, program_id, output_path, benchmarks=
 
     # Generate output paths
     # output_path will be something like: export/alphabet/mft/charts/alphabet_mft_event_probability.pdf
-    # We need to change extension to .png and add range suffixes
+    # We need to add range suffixes (keep .pdf extension)
     base_path = str(output_path).replace('.pdf', '')
-    output_path_short = f"{base_path}_0_2.png"
-    output_path_long = f"{base_path}_0_8.png"
+    output_path_short = f"{base_path}_0_2.pdf"
+    output_path_long = f"{base_path}_0_8.pdf"
 
     # Configuration
     config = {
@@ -367,7 +367,7 @@ def generate_event_probability_analysis(db, program_id, output_path, benchmarks=
         output_path_short, output_path_long
     )
 
-    print(f"Event probability charts generated:")
+    print(f"Event probability PDF charts generated:")
     print(f"  Short range (0-2): {output_path_short}")
     print(f"  Long range (0-8): {output_path_long}")
 

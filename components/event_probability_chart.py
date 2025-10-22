@@ -158,8 +158,8 @@ def render_event_probability_chart(
     # Tight layout
     plt.tight_layout()
 
-    # Save figure
-    plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
+    # Save figure (format determined by file extension)
+    plt.savefig(output_path, dpi=dpi, bbox_inches='tight', format='pdf')
     plt.close()
 
     print(f"Event probability chart saved to: {output_path}")

@@ -102,8 +102,8 @@ def main():
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Generate output paths
-        output_path_short = output_dir / 'alphabet_mft_event_probability_0_2.png'
-        output_path_long = output_dir / 'alphabet_mft_event_probability_0_8.png'
+        output_path_short = output_dir / 'alphabet_mft_event_probability_0_2.pdf'
+        output_path_long = output_dir / 'alphabet_mft_event_probability_0_8.pdf'
 
         # Configuration
         config = {
