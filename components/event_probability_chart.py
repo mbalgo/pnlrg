@@ -114,16 +114,11 @@ def render_event_probability_chart(
         fontweight='bold'
     )
 
-    # Add title
+    # Add title (without subtitle showing std dev)
     if subtitle:
         full_title = f"{title}\n{subtitle}"
     else:
-        # Auto-generate subtitle based on normalization method
-        if epa_data.used_target_std_dev:
-            norm_method = f"X-axis: Daily P&L / Target Std Dev ({epa_data.target_std_dev*100:.1f}%)"
-        else:
-            norm_method = f"X-axis: Daily P&L / Realized Std Dev ({epa_data.realized_std_dev*100:.2f}%)"
-        full_title = f"{title}\n{norm_method}"
+        full_title = title
 
     ax.set_title(full_title, fontsize=14, fontweight='bold', pad=20)
 
