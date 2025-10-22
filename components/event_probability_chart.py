@@ -192,13 +192,14 @@ def render_event_probability_chart_pair(
         ...     'event_prob_0_2.png', 'event_prob_0_8.png'
         ... )
     """
-    # Render short-range chart
+    # Render short-range chart (0-2)
     config_short = config.copy()
-    config_short['title'] = config.get('title', 'Event Probability Analysis') + ' (0-2 Std Dev)'
+    config_short['title'] = config.get('title', 'Event Probability Analysis')
+    config_short['y_min'] = 0.001  # Start at 0.1% for better visibility of common events
     render_event_probability_chart(epa_data_short, config_short, output_path_short)
 
-    # Render long-range chart
+    # Render long-range chart (0-8)
     config_long = config.copy()
-    config_long['title'] = config.get('title', 'Event Probability Analysis') + ' (0-8 Std Dev)'
-    config_long['y_min'] = 0.0000001  # Lower minimum for long-range view
+    config_long['title'] = config.get('title', 'Event Probability Analysis')
+    config_long['y_min'] = 0.0000001  # Lower minimum for long-range view to show rare events
     render_event_probability_chart(epa_data_long, config_long, output_path_long)
