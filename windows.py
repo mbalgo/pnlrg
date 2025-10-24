@@ -1053,6 +1053,82 @@ def generate_window_definitions_overlapping(
     return windows
 
 
+def generate_window_definitions_overlapping_by_days(
+    start_date: date,
+    end_date: date,
+    window_length_months: int,
+    slide_days: int = 1,
+    program_ids: List[int] = None,
+    benchmark_ids: List[int] = None,
+    window_set_name: Optional[str] = None
+) -> List[WindowDefinition]:
+    """
+    Generate overlapping rolling windows that slide forward by DAYS (not months).
+
+    This enables smooth rolling calculations (like rolling CAGR) with daily granularity.
+    Unlike generate_window_definitions_overlapping(), which slides by months, this
+    function slides by a fixed number of calendar days.
+
+    Args:
+        start_date: First date of first window
+        end_date: Latest date to consider
+        window_length_months: Length of each window in months
+        slide_days: How many days to slide forward for each window (default 1)
+        program_ids: Programs to include (default empty list)
+        benchmark_ids: Benchmarks to include (default empty list)
+        window_set_name: Optional name for this set
+
+    Returns:
+        List of WindowDefinition objects
+
+    Example:
+        >>> # Generate 12-month rolling windows sliding by 1 day
+        >>> windows = generate_window_definitions_overlapping_by_days(
+        ...     start_date=date(2006, 1, 3),
+        ...     end_date=date(2025, 10, 17),
+        ...     window_length_months=12,
+        ...     slide_days=1,
+        ...     program_ids=[11],
+        ...     benchmark_ids=[]
+        ... )
+        >>> # Returns: [2006-01-03 to 2007-01-02], [2006-01-04 to 2007-01-03], ...
+        >>> # (one window per day, each spanning 12 months)
+    """
+    if program_ids is None:
+        program_ids = []
+    if benchmark_ids is None:
+        benchmark_ids = []
+
+    windows = []
+    current_start = start_date
+    index = 0
+
+    while True:
+        # Calculate end date (window_length_months forward, minus 1 day)
+        win_end = current_start + relativedelta(months=window_length_months) - relativedelta(days=1)
+
+        # Stop if window extends beyond data range
+        if win_end > end_date:
+            break
+
+        win_def = WindowDefinition(
+            start_date=current_start,
+            end_date=win_end,
+            program_ids=program_ids.copy(),
+            benchmark_ids=benchmark_ids.copy(),
+            name=f"Rolling {window_length_months}M (ending {win_end.strftime('%Y-%m-%d')})",
+            window_set=window_set_name,
+            index=index
+        )
+        windows.append(win_def)
+
+        # Slide forward by days
+        current_start += relativedelta(days=slide_days)
+        index += 1
+
+    return windows
+
+
 def generate_window_definitions_overlapping_reverse(
     end_date: date,
     earliest_date: date,

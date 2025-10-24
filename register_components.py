@@ -17,6 +17,7 @@ from components.pdf_tables import (
     create_summary_statistics_table_pdf
 )
 from components.event_probability_chart import render_event_probability_chart_pair
+from components.rolling_cagr_chart import generate_rolling_cagr_chart
 from windows import (
     generate_window_definitions_non_overlapping_reverse,
     compute_statistics,
@@ -378,6 +379,55 @@ def generate_event_probability_analysis(db, program_id, output_path, benchmarks=
 
 
 # =============================================================================
+# Rolling CAGR Chart Component Wrappers
+# =============================================================================
+
+def generate_rolling_cagr_1month(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 1-month rolling CAGR chart (1-day slide)."""
+    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=1, benchmarks=benchmarks, **kwargs)
+
+
+def generate_rolling_cagr_2month(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 2-month rolling CAGR chart (1-day slide)."""
+    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=2, benchmarks=benchmarks, **kwargs)
+
+
+def generate_rolling_cagr_3month(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 3-month rolling CAGR chart (1-day slide)."""
+    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=3, benchmarks=benchmarks, **kwargs)
+
+
+def generate_rolling_cagr_6month(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 6-month rolling CAGR chart (1-day slide)."""
+    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=6, benchmarks=benchmarks, **kwargs)
+
+
+def generate_rolling_cagr_1year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 1-year rolling CAGR chart (1-day slide)."""
+    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=12, benchmarks=benchmarks, **kwargs)
+
+
+def generate_rolling_cagr_2year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 2-year rolling CAGR chart (1-day slide)."""
+    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=24, benchmarks=benchmarks, **kwargs)
+
+
+def generate_rolling_cagr_3year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 3-year rolling CAGR chart (1-day slide)."""
+    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=36, benchmarks=benchmarks, **kwargs)
+
+
+def generate_rolling_cagr_5year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 5-year rolling CAGR chart (1-day slide)."""
+    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=60, benchmarks=benchmarks, **kwargs)
+
+
+def generate_rolling_cagr_10year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 10-year rolling CAGR chart (1-day slide)."""
+    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=120, benchmarks=benchmarks, **kwargs)
+
+
+# =============================================================================
 # Table Component Implementations
 # =============================================================================
 
@@ -662,6 +712,107 @@ def register_all_components():
         description='Tail risk analysis showing probability of extreme events vs normal distribution',
         function=generate_event_probability_analysis,
         benchmark_support=False,
+        version='1.0.0'
+    )
+
+    # Rolling CAGR Charts (Month-based windows)
+    register_component(
+        id='rolling_cagr_1month',
+        name='Rolling CAGR (1-Month)',
+        category='chart',
+        description='1-month rolling CAGR with 1-day slide intervals',
+        function=generate_rolling_cagr_1month,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='rolling_cagr_2month',
+        name='Rolling CAGR (2-Month)',
+        category='chart',
+        description='2-month rolling CAGR with 1-day slide intervals',
+        function=generate_rolling_cagr_2month,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='rolling_cagr_3month',
+        name='Rolling CAGR (3-Month)',
+        category='chart',
+        description='3-month rolling CAGR with 1-day slide intervals',
+        function=generate_rolling_cagr_3month,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='rolling_cagr_6month',
+        name='Rolling CAGR (6-Month)',
+        category='chart',
+        description='6-month rolling CAGR with 1-day slide intervals',
+        function=generate_rolling_cagr_6month,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    # Rolling CAGR Charts (Year-based windows)
+    register_component(
+        id='rolling_cagr_1year',
+        name='Rolling CAGR (1-Year)',
+        category='chart',
+        description='1-year rolling CAGR with 1-day slide intervals',
+        function=generate_rolling_cagr_1year,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='rolling_cagr_2year',
+        name='Rolling CAGR (2-Year)',
+        category='chart',
+        description='2-year rolling CAGR with 1-day slide intervals',
+        function=generate_rolling_cagr_2year,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='rolling_cagr_3year',
+        name='Rolling CAGR (3-Year)',
+        category='chart',
+        description='3-year rolling CAGR with 1-day slide intervals',
+        function=generate_rolling_cagr_3year,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='rolling_cagr_5year',
+        name='Rolling CAGR (5-Year)',
+        category='chart',
+        description='5-year rolling CAGR with 1-day slide intervals',
+        function=generate_rolling_cagr_5year,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='rolling_cagr_10year',
+        name='Rolling CAGR (10-Year)',
+        category='chart',
+        description='10-year rolling CAGR with 1-day slide intervals',
+        function=generate_rolling_cagr_10year,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
         version='1.0.0'
     )
 
