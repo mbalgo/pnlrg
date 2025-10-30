@@ -17,7 +17,13 @@ from components.pdf_tables import (
     create_summary_statistics_table_pdf
 )
 from components.event_probability_chart import render_event_probability_chart_pair
-from components.rolling_cagr_chart import generate_rolling_cagr_chart
+from components.rolling_statistics_chart import (
+    generate_rolling_statistic_chart,
+    calculate_cagr_statistic,
+    calculate_annualized_return_statistic
+)
+from components.yearly_fees_summary import generate_yearly_fees_summary
+from components.detailed_fees_excel import generate_detailed_fees_excel
 from windows import (
     generate_window_definitions_non_overlapping_reverse,
     compute_statistics,
@@ -384,47 +390,204 @@ def generate_event_probability_analysis(db, program_id, output_path, benchmarks=
 
 def generate_rolling_cagr_1month(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
     """Generate 1-month rolling CAGR chart (1-day slide)."""
-    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=1, benchmarks=benchmarks, **kwargs)
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=1,
+        statistic_calculator=calculate_cagr_statistic,
+        statistic_name="CAGR",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
 
 
 def generate_rolling_cagr_2month(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
     """Generate 2-month rolling CAGR chart (1-day slide)."""
-    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=2, benchmarks=benchmarks, **kwargs)
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=2,
+        statistic_calculator=calculate_cagr_statistic,
+        statistic_name="CAGR",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
 
 
 def generate_rolling_cagr_3month(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
     """Generate 3-month rolling CAGR chart (1-day slide)."""
-    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=3, benchmarks=benchmarks, **kwargs)
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=3,
+        statistic_calculator=calculate_cagr_statistic,
+        statistic_name="CAGR",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
 
 
 def generate_rolling_cagr_6month(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
     """Generate 6-month rolling CAGR chart (1-day slide)."""
-    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=6, benchmarks=benchmarks, **kwargs)
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=6,
+        statistic_calculator=calculate_cagr_statistic,
+        statistic_name="CAGR",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
 
 
 def generate_rolling_cagr_1year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
     """Generate 1-year rolling CAGR chart (1-day slide)."""
-    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=12, benchmarks=benchmarks, **kwargs)
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=12,
+        statistic_calculator=calculate_cagr_statistic,
+        statistic_name="CAGR",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
 
 
 def generate_rolling_cagr_2year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
     """Generate 2-year rolling CAGR chart (1-day slide)."""
-    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=24, benchmarks=benchmarks, **kwargs)
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=24,
+        statistic_calculator=calculate_cagr_statistic,
+        statistic_name="CAGR",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
 
 
 def generate_rolling_cagr_3year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
     """Generate 3-year rolling CAGR chart (1-day slide)."""
-    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=36, benchmarks=benchmarks, **kwargs)
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=36,
+        statistic_calculator=calculate_cagr_statistic,
+        statistic_name="CAGR",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
 
 
 def generate_rolling_cagr_5year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
     """Generate 5-year rolling CAGR chart (1-day slide)."""
-    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=60, benchmarks=benchmarks, **kwargs)
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=60,
+        statistic_calculator=calculate_cagr_statistic,
+        statistic_name="CAGR",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
 
 
 def generate_rolling_cagr_10year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
     """Generate 10-year rolling CAGR chart (1-day slide)."""
-    return generate_rolling_cagr_chart(db, program_id, output_path, window_months=120, benchmarks=benchmarks, **kwargs)
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=120,
+        statistic_calculator=calculate_cagr_statistic,
+        statistic_name="CAGR",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
+
+
+# =============================================================================
+# Rolling Annualized Return Chart Component Wrappers
+# =============================================================================
+
+def generate_rolling_annualized_return_1month(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 1-month rolling annualized return chart (arithmetic mean × 261, 1-day slide)."""
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=1,
+        statistic_calculator=calculate_annualized_return_statistic,
+        statistic_name="Annualized Return",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
+
+
+def generate_rolling_annualized_return_2month(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 2-month rolling annualized return chart (arithmetic mean × 261, 1-day slide)."""
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=2,
+        statistic_calculator=calculate_annualized_return_statistic,
+        statistic_name="Annualized Return",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
+
+
+def generate_rolling_annualized_return_3month(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 3-month rolling annualized return chart (arithmetic mean × 261, 1-day slide)."""
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=3,
+        statistic_calculator=calculate_annualized_return_statistic,
+        statistic_name="Annualized Return",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
+
+
+def generate_rolling_annualized_return_6month(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 6-month rolling annualized return chart (arithmetic mean × 261, 1-day slide)."""
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=6,
+        statistic_calculator=calculate_annualized_return_statistic,
+        statistic_name="Annualized Return",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
+
+
+def generate_rolling_annualized_return_1year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 1-year rolling annualized return chart (arithmetic mean × 261, 1-day slide)."""
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=12,
+        statistic_calculator=calculate_annualized_return_statistic,
+        statistic_name="Annualized Return",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
+
+
+def generate_rolling_annualized_return_2year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 2-year rolling annualized return chart (arithmetic mean × 261, 1-day slide)."""
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=24,
+        statistic_calculator=calculate_annualized_return_statistic,
+        statistic_name="Annualized Return",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
+
+
+def generate_rolling_annualized_return_3year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 3-year rolling annualized return chart (arithmetic mean × 261, 1-day slide)."""
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=36,
+        statistic_calculator=calculate_annualized_return_statistic,
+        statistic_name="Annualized Return",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
+
+
+def generate_rolling_annualized_return_5year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 5-year rolling annualized return chart (arithmetic mean × 261, 1-day slide)."""
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=60,
+        statistic_calculator=calculate_annualized_return_statistic,
+        statistic_name="Annualized Return",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
+
+
+def generate_rolling_annualized_return_10year(db, program_id, output_path, benchmarks=None, variant=None, **kwargs):
+    """Generate 10-year rolling annualized return chart (arithmetic mean × 261, 1-day slide)."""
+    return generate_rolling_statistic_chart(
+        db, program_id, output_path, window_months=120,
+        statistic_calculator=calculate_annualized_return_statistic,
+        statistic_name="Annualized Return",
+        y_axis_label="Annualized Return (%)",
+        benchmarks=benchmarks, **kwargs
+    )
 
 
 # =============================================================================
@@ -816,6 +979,107 @@ def register_all_components():
         version='1.0.0'
     )
 
+    # Rolling Annualized Return Charts (Month-based windows)
+    register_component(
+        id='rolling_annualized_return_1month',
+        name='Rolling Annualized Return (1-Month)',
+        category='chart',
+        description='1-month rolling annualized return (arithmetic mean × 261) with 1-day slide',
+        function=generate_rolling_annualized_return_1month,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='rolling_annualized_return_2month',
+        name='Rolling Annualized Return (2-Month)',
+        category='chart',
+        description='2-month rolling annualized return (arithmetic mean × 261) with 1-day slide',
+        function=generate_rolling_annualized_return_2month,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='rolling_annualized_return_3month',
+        name='Rolling Annualized Return (3-Month)',
+        category='chart',
+        description='3-month rolling annualized return (arithmetic mean × 261) with 1-day slide',
+        function=generate_rolling_annualized_return_3month,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='rolling_annualized_return_6month',
+        name='Rolling Annualized Return (6-Month)',
+        category='chart',
+        description='6-month rolling annualized return (arithmetic mean × 261) with 1-day slide',
+        function=generate_rolling_annualized_return_6month,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    # Rolling Annualized Return Charts (Year-based windows)
+    register_component(
+        id='rolling_annualized_return_1year',
+        name='Rolling Annualized Return (1-Year)',
+        category='chart',
+        description='1-year rolling annualized return (arithmetic mean × 261) with 1-day slide',
+        function=generate_rolling_annualized_return_1year,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='rolling_annualized_return_2year',
+        name='Rolling Annualized Return (2-Year)',
+        category='chart',
+        description='2-year rolling annualized return (arithmetic mean × 261) with 1-day slide',
+        function=generate_rolling_annualized_return_2year,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='rolling_annualized_return_3year',
+        name='Rolling Annualized Return (3-Year)',
+        category='chart',
+        description='3-year rolling annualized return (arithmetic mean × 261) with 1-day slide',
+        function=generate_rolling_annualized_return_3year,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='rolling_annualized_return_5year',
+        name='Rolling Annualized Return (5-Year)',
+        category='chart',
+        description='5-year rolling annualized return (arithmetic mean × 261) with 1-day slide',
+        function=generate_rolling_annualized_return_5year,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
+    register_component(
+        id='rolling_annualized_return_10year',
+        name='Rolling Annualized Return (10-Year)',
+        category='chart',
+        description='10-year rolling annualized return (arithmetic mean × 261) with 1-day slide',
+        function=generate_rolling_annualized_return_10year,
+        benchmark_support=True,
+        benchmark_combinations=[[], ['sp500'], ['areit']],
+        version='1.0.0'
+    )
+
     # TABLES
     register_component(
         id='windows_performance_table',
@@ -844,6 +1108,28 @@ def register_all_components():
         category='text',
         description='Standard legal disclaimer for performance reports',
         function=generate_disclaimer,
+        benchmark_support=False,
+        version='1.0.0'
+    )
+
+    # FEE SCENARIO TABLES
+    register_component(
+        id='yearly_fees_summary',
+        name='Yearly Fees Summary',
+        category='table',
+        description='Annual breakdown of management/performance fees and investor returns with CAGR',
+        function=generate_yearly_fees_summary,
+        benchmark_support=False,
+        version='1.0.0'
+    )
+
+    # FEE SCENARIO EXCEL EXPORTS
+    register_component(
+        id='detailed_fees_excel',
+        name='Detailed Fees Excel Export',
+        category='export',
+        description='Comprehensive Excel workbook with methodology, yearly/monthly/daily fee calculations, and market returns',
+        function=generate_detailed_fees_excel,
         benchmark_support=False,
         version='1.0.0'
     )
