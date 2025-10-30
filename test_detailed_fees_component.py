@@ -2,6 +2,7 @@
 Test script for detailed fees Excel component.
 
 This tests that the component can be called via the registry.
+Verifies successful generation of comprehensive fee analysis workbook.
 """
 
 from database import Database
