@@ -20,6 +20,7 @@ from fee_scenarios import load_fee_scenario, calculate_net_nav_series, get_daily
 from datetime import date
 from typing import Optional
 from collections import defaultdict
+from calendar import monthrange
 
 
 def create_explanation_sheet(wb, scenario):
@@ -264,7 +265,6 @@ def create_yearly_summary_sheet(wb, monthly_series, fund_size, start_date, end_d
         previous_hwm = calc.high_water_mark_pct
 
     # Calculate yearly aggregates
-    inception_date = monthly_series[0].date
     row_idx = 2
 
     for year in sorted(yearly_data.keys()):
@@ -286,13 +286,22 @@ def create_yearly_summary_sheet(wb, monthly_series, fund_size, start_date, end_d
         year_return_pct = end_cumulative - year_info['start_cumulative']
         investor_year_profit = (year_return_pct - total_fee_pct) * fund_size
 
-        # Calculate cumulative CAGR from inception
+        # Calculate cumulative CAGR from inception using actual start_date
         months_since_inception = monthly_series.index(months[-1]) + 1
         total_fees_to_date = sum(m.total_fee_pct for m in monthly_series[:months_since_inception])
         investor_net_return = end_cumulative - total_fees_to_date
         investor_value = fund_size * (1.0 + investor_net_return)
 
-        years_from_inception = (months[-1].date - inception_date).days / 365.25
+        # Use the last day of the month for end calculation
+        # This approximates the actual end_date for the last year
+        last_month_date = months[-1].date
+        year_val = last_month_date.year
+        month_val = last_month_date.month
+        last_day = monthrange(year_val, month_val)[1]
+        month_end_date = date(year_val, month_val, last_day)
+
+        # Calculate years from actual start_date to end of this month
+        years_from_inception = (month_end_date - start_date).days / 365.25
         if years_from_inception > 0 and investor_value > 0:
             cagr = ((investor_value / fund_size) ** (1.0 / years_from_inception) - 1.0) * 100
         else:
